@@ -1,0 +1,23 @@
+/Users/mannymoreno/Documents/CodeProjects/ai-harness-engineer/your-claude-engineer/generations/la-rent-finder/lib:
+total 64
+-rw-r--r--@ 1 mannymoreno  staff  15235 Feb 11 22:56 database.types.ts
+-rw-r--r--@ 1 mannymoreno  staff   8938 Feb 11 22:46 supabase.ts
+-rw-r--r--@ 1 mannymoreno  staff    169 Feb 11 22:35 utils.ts
+
+/Users/mannymoreno/Documents/CodeProjects/ai-harness-engineer/your-claude-engineer/generations/la-rent-finder/supabase:
+total 208
+-rw-r--r--@ 1 mannymoreno  staff   9158 Feb 11 22:57 MIGRATION_GUIDE.md
+-rw-r--r--@ 1 mannymoreno  staff   7486 Feb 11 22:46 README.md
+-rw-r--r--@ 1 mannymoreno  staff  15116 Feb 11 22:59 SCHEMA_SUMMARY.md
+-rw-r--r--@ 1 mannymoreno  staff   5548 Feb 11 22:48 SETUP_GUIDE.md
+drwxr-xr-x@ 4 mannymoreno  staff    128 Feb 11 22:55 migrations
+-rw-r--r--@ 1 mannymoreno  staff  19595 Feb 11 23:00 schema_visualization.html
+-rw-r--r--@ 1 mannymoreno  staff  11320 Feb 11 22:45 seed.sql
+-rw-r--r--@ 1 mannymoreno  staff   7310 Feb 11 22:56 test_connection.ts
+-rw-r--r--@ 1 mannymoreno  staff   8931 Feb 11 22:58 verify_schema.sql
+-rw-r--r--@ 1 mannymoreno  staff   5476 Feb 11 22:48 verify_setup.sql
+
+/Users/mannymoreno/Documents/CodeProjects/ai-harness-engineer/your-claude-engineer/generations/la-rent-finder/supabase/migrations:
+total 56
+-rw-r--r--@ 1 mannymoreno  staff  12861 Feb 11 22:44 20260211000001_initial_schema.sql
+-rw-r--r--@ 1 mannymoreno  staff   9041 Feb 11 22:55 20260211000002_add_missing_tables.sql

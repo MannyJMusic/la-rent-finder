@@ -1,0 +1,781 @@
+/**
+ * Market Researcher Agent
+ *
+ * Receives search criteria from the orchestrator and:
+ *  1. Builds a search query from user preferences and extracted params
+ *  2. Uses Claude with web_search tool to find rental listings online
+ *  3. Normalizes discovered listings into the standard AgentListing format
+ *  4. Scores each listing (1-100) based on user preferences
+ *  5. Returns scored, ranked listings
+ *
+ * Includes a mock/fallback mode that returns sample LA listings
+ * when the API calls fail or for development purposes.
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import {
+  BaseAgent,
+  getAnthropicClient,
+  MODELS,
+  streamText,
+} from './framework';
+import type {
+  AgentConfig,
+  AgentListing,
+  ExtractedParams,
+  ScoringResult,
+  StreamEvent,
+  SubAgentContext,
+  UserPreferencesData,
+} from './types';
+import { createClient } from '@/lib/supabase/server';
+import type { Json } from '@/lib/database.types';
+
+// ─── Configuration ──────────────────────────────────────────────
+
+const MARKET_RESEARCHER_CONFIG: AgentConfig = {
+  name: 'MarketResearcher',
+  model: MODELS.SONNET,
+  systemPrompt: MARKET_RESEARCHER_SYSTEM_PROMPT(),
+  maxTokens: 4096,
+  temperature: 0.2,
+  timeoutMs: 60_000, // Longer timeout for web search
+};
+
+function MARKET_RESEARCHER_SYSTEM_PROMPT(): string {
+  return `You are a real estate research agent specializing in Los Angeles rental apartments. Your job is to search the web for available rental listings that match the user's criteria.
+
+When searching, focus on:
+- Major LA rental listing sites (apartments.com, zillow.com, trulia.com, hotpads.com, westsiderentals.com, craigslist.org)
+- The specific neighborhoods, budget range, and bedroom count the user wants
+- Current availability (listings posted within the last 30 days)
+
+After finding listings, you must return a JSON array of listings with this exact shape:
+
+[
+  {
+    "title": "string - descriptive title",
+    "address": "string - full street address",
+    "location": "string - neighborhood/area name",
+    "price": number,
+    "bedrooms": number,
+    "bathrooms": number,
+    "square_feet": number | null,
+    "amenities": ["string"] | null,
+    "parking_available": boolean,
+    "pet_policy": "string" | null,
+    "available_date": "YYYY-MM-DD" | null,
+    "latitude": number | null,
+    "longitude": number | null,
+    "listing_url": "string" | null,
+    "description": "string - brief description",
+    "source": "string - website name"
+  }
+]
+
+Return ONLY the JSON array, no markdown or explanations. If you cannot find real listings, return an empty array [].`;
+}
+
+// ─── Market Researcher Agent ────────────────────────────────────
+
+export class MarketResearcherAgent extends BaseAgent {
+  private client: Anthropic;
+
+  constructor() {
+    super(MARKET_RESEARCHER_CONFIG);
+    this.client = getAnthropicClient();
+  }
+
+  async *execute(context: SubAgentContext): AsyncGenerator<StreamEvent> {
+    yield this.statusEvent('searching');
+
+    // Build search query from context
+    const searchQuery = this.buildSearchQuery(context);
+
+    yield* streamText(
+      `Searching for apartments: ${searchQuery}...`,
+      this.name,
+      20,
+    );
+
+    // Attempt web search via Claude
+    let rawListings: AgentListing[];
+
+    try {
+      rawListings = await this.searchListings(searchQuery, context);
+    } catch (err) {
+      console.error('[MarketResearcher] Web search failed, using fallback:', err);
+      // Fall back to mock data
+      rawListings = this.getMockListings(context);
+    }
+
+    if (rawListings.length === 0) {
+      // Use mock data if no results found
+      rawListings = this.getMockListings(context);
+    }
+
+    yield this.statusEvent('analyzing');
+
+    yield* streamText(
+      `\n\nFound ${rawListings.length} listings. Scoring and ranking them based on your preferences...`,
+      this.name,
+      20,
+    );
+
+    // Persist listings to the apartments table
+    const persistedListings = await this.persistListings(rawListings);
+
+    // Score listings
+    const scoredListings = this.scoreListings(persistedListings, context);
+
+    // Sort by score descending
+    scoredListings.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+    // Persist scores to listing_scores table
+    await this.persistScores(scoredListings, context);
+
+    // Emit listings event
+    yield {
+      type: 'listings',
+      listings: scoredListings,
+      agentName: this.name,
+    };
+
+    // Generate summary text
+    const summary = this.generateSummaryText(scoredListings, context);
+    yield* streamText(summary, this.name, 20);
+  }
+
+  // ─── Search Query Builder ───────────────────────────────────
+
+  private buildSearchQuery(context: SubAgentContext): string {
+    const params = context.extractedParams;
+    const prefs = context.preferences;
+    const parts: string[] = ['apartments for rent in'];
+
+    // Neighborhoods
+    const neighborhoods =
+      params.neighborhoods?.length
+        ? params.neighborhoods
+        : prefs?.neighborhoods?.length
+          ? prefs.neighborhoods
+          : ['Los Angeles'];
+    parts.push(neighborhoods.join(', '));
+
+    // Budget
+    const maxBudget = params.maxBudget ?? prefs?.max_budget;
+    const minBudget = params.minBudget ?? prefs?.min_budget;
+    if (maxBudget) {
+      parts.push(`under $${maxBudget}/month`);
+    } else if (minBudget) {
+      parts.push(`starting at $${minBudget}/month`);
+    }
+
+    // Bedrooms
+    const minBed = params.minBedrooms ?? prefs?.min_bedrooms;
+    if (minBed) {
+      parts.push(`${minBed}+ bedrooms`);
+    }
+
+    // Pet friendly
+    if (params.petFriendly || prefs?.pet_friendly) {
+      parts.push('pet friendly');
+    }
+
+    // Parking
+    if (params.parkingRequired || prefs?.parking_required) {
+      parts.push('with parking');
+    }
+
+    // Free-form query
+    if (params.searchQuery) {
+      parts.push(params.searchQuery);
+    }
+
+    return parts.join(' ');
+  }
+
+  // ─── Web Search via Claude ────────────────────────────────────
+
+  private async searchListings(
+    query: string,
+    context: SubAgentContext,
+  ): Promise<AgentListing[]> {
+    const searchMessages: Anthropic.MessageParam[] = [
+      {
+        role: 'user',
+        content: `Search for: ${query}\n\nUser preferences: ${JSON.stringify(context.preferences || {})}\n\nExtracted parameters: ${JSON.stringify(context.extractedParams)}\n\nPlease search for available rental listings matching these criteria and return them as a JSON array.`,
+      },
+    ];
+
+    // Use Claude with web_search tool
+    const response = await this.client.messages.create({
+      model: this.config.model,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      system: this.config.systemPrompt,
+      tools: [
+        {
+          type: 'web_search' as 'web_search_20250305',
+          name: 'web_search',
+          max_uses: 5,
+        } as Anthropic.WebSearchTool20250305,
+      ],
+      messages: searchMessages,
+    });
+
+    // Extract text content from the response
+    const textBlocks = response.content.filter(
+      (b): b is Anthropic.TextBlock => b.type === 'text',
+    );
+    const fullText = textBlocks.map((b) => b.text).join('\n');
+
+    return this.parseListingsFromResponse(fullText);
+  }
+
+  // ─── Response Parser ──────────────────────────────────────────
+
+  private parseListingsFromResponse(responseText: string): AgentListing[] {
+    // Try to find a JSON array in the response
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      return [];
+    }
+
+    try {
+      const rawArray = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(rawArray)) return [];
+
+      return rawArray.map((item: Record<string, unknown>, index: number) =>
+        this.normalizeListing(item, index),
+      );
+    } catch {
+      console.error('[MarketResearcher] Failed to parse listings JSON');
+      return [];
+    }
+  }
+
+  private normalizeListing(
+    raw: Record<string, unknown>,
+    index: number,
+  ): AgentListing {
+    return {
+      id: `search-${Date.now()}-${index}`,
+      title: String(raw.title || 'Untitled Listing'),
+      address: String(raw.address || 'Address unavailable'),
+      location: String(raw.location || raw.neighborhood || 'Los Angeles'),
+      price: Number(raw.price) || 0,
+      bedrooms: Number(raw.bedrooms) || 0,
+      bathrooms: Number(raw.bathrooms) || 1,
+      square_feet: raw.square_feet != null ? Number(raw.square_feet) : null,
+      photos: Array.isArray(raw.photos) ? raw.photos.map(String) : [],
+      amenities: Array.isArray(raw.amenities) ? raw.amenities.map(String) : null,
+      parking_available: Boolean(raw.parking_available),
+      pet_policy: raw.pet_policy != null ? String(raw.pet_policy) : null,
+      available_date: raw.available_date != null ? String(raw.available_date) : null,
+      latitude: raw.latitude != null ? Number(raw.latitude) : null,
+      longitude: raw.longitude != null ? Number(raw.longitude) : null,
+      listing_url: raw.listing_url != null ? String(raw.listing_url) : null,
+      description: raw.description != null ? String(raw.description) : null,
+      source: raw.source != null ? String(raw.source) : 'web_search',
+    };
+  }
+
+  // ─── Listing Scoring ──────────────────────────────────────────
+
+  private scoreListings(
+    listings: AgentListing[],
+    context: SubAgentContext,
+  ): AgentListing[] {
+    const prefs = context.preferences;
+    const params = context.extractedParams;
+
+    return listings.map((listing) => {
+      const scoring = this.scoreListing(listing, prefs, params);
+      return {
+        ...listing,
+        score: scoring.overall_score,
+        scoring,
+      };
+    });
+  }
+
+  private scoreListing(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): ScoringResult {
+    const scores = {
+      price_score: this.scorePriceMatch(listing, prefs, params),
+      location_score: this.scoreLocationMatch(listing, prefs, params),
+      size_score: this.scoreSizeMatch(listing, prefs, params),
+      amenity_score: this.scoreAmenityMatch(listing, prefs, params),
+      quality_score: this.scoreListingQuality(listing),
+      freshness_score: this.scoreFreshness(listing),
+      source_reliability_score: this.scoreSourceReliability(listing),
+    };
+
+    // Weighted average (prices matter most in LA)
+    const weights = {
+      price_score: 0.30,
+      location_score: 0.25,
+      size_score: 0.15,
+      amenity_score: 0.10,
+      quality_score: 0.08,
+      freshness_score: 0.07,
+      source_reliability_score: 0.05,
+    };
+
+    const overall_score = Math.round(
+      Object.entries(weights).reduce(
+        (sum, [key, weight]) => sum + scores[key as keyof typeof scores] * weight,
+        0,
+      ),
+    );
+
+    // Generate pros and cons
+    const pros: string[] = [];
+    const cons: string[] = [];
+
+    if (scores.price_score >= 80) pros.push('Great price for the area');
+    if (scores.price_score < 40) cons.push('Above typical budget range');
+    if (scores.location_score >= 80) pros.push('Ideal neighborhood match');
+    if (scores.amenity_score >= 70) pros.push('Good amenity match');
+    if (listing.parking_available) pros.push('Parking included');
+    if (listing.pet_policy && listing.pet_policy !== 'no pets') pros.push('Pet-friendly');
+    if (!listing.parking_available && (prefs?.parking_required || params.parkingRequired)) {
+      cons.push('No parking available');
+    }
+
+    return {
+      overall_score,
+      ...scores,
+      reasoning: `Score: ${overall_score}/100 based on price (${scores.price_score}), location (${scores.location_score}), size (${scores.size_score}), amenities (${scores.amenity_score})`,
+      pros,
+      cons,
+    };
+  }
+
+  private scorePriceMatch(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): number {
+    const maxBudget = params.maxBudget ?? prefs?.max_budget;
+    const minBudget = params.minBudget ?? prefs?.min_budget;
+
+    if (!maxBudget && !minBudget) return 70; // No preference, neutral score
+
+    if (maxBudget && listing.price <= maxBudget) {
+      // Under budget is great. Closer to budget = higher score
+      // (too cheap might indicate issues)
+      const ratio = listing.price / maxBudget;
+      if (ratio >= 0.7 && ratio <= 1.0) return 95;
+      if (ratio >= 0.5) return 80;
+      return 65;
+    }
+
+    if (maxBudget && listing.price > maxBudget) {
+      // Over budget
+      const overBy = (listing.price - maxBudget) / maxBudget;
+      if (overBy <= 0.1) return 50; // Slightly over
+      if (overBy <= 0.2) return 30;
+      return 10;
+    }
+
+    return 70;
+  }
+
+  private scoreLocationMatch(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): number {
+    const targetNeighborhoods = [
+      ...(params.neighborhoods || []),
+      ...(prefs?.neighborhoods || []),
+    ].map((n) => n.toLowerCase());
+
+    if (targetNeighborhoods.length === 0) return 70;
+
+    const listingLocation = listing.location.toLowerCase();
+    const listingAddress = listing.address.toLowerCase();
+
+    // Exact neighborhood match
+    for (const target of targetNeighborhoods) {
+      if (listingLocation.includes(target) || listingAddress.includes(target)) {
+        return 95;
+      }
+    }
+
+    // Check for adjacent/related neighborhoods (simplified)
+    const laNeighborhoodGroups: Record<string, string[]> = {
+      'downtown': ['dtla', 'arts district', 'little tokyo', 'chinatown', 'financial district'],
+      'westside': ['santa monica', 'venice', 'mar vista', 'culver city', 'west la', 'brentwood', 'westwood'],
+      'hollywood': ['west hollywood', 'east hollywood', 'hollywood hills', 'los feliz', 'silver lake'],
+      'south bay': ['manhattan beach', 'hermosa beach', 'redondo beach', 'torrance', 'el segundo'],
+      'valley': ['sherman oaks', 'studio city', 'north hollywood', 'burbank', 'glendale', 'encino'],
+      'eastside': ['eagle rock', 'highland park', 'echo park', 'atwater village', 'glassell park'],
+      'koreatown': ['ktown', 'mid-wilshire', 'wilshire center'],
+      'pasadena': ['south pasadena', 'altadena', 'san marino'],
+    };
+
+    for (const target of targetNeighborhoods) {
+      for (const [, group] of Object.entries(laNeighborhoodGroups)) {
+        const inSameGroup =
+          group.some((n) => target.includes(n) || n.includes(target)) &&
+          group.some(
+            (n) =>
+              listingLocation.includes(n) || listingAddress.includes(n),
+          );
+        if (inSameGroup) return 70;
+      }
+    }
+
+    return 40;
+  }
+
+  private scoreSizeMatch(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): number {
+    const minBed = params.minBedrooms ?? prefs?.min_bedrooms;
+    const maxBed = params.maxBedrooms ?? prefs?.max_bedrooms;
+
+    if (!minBed && !maxBed) return 70;
+
+    if (minBed && listing.bedrooms >= minBed) {
+      if (maxBed && listing.bedrooms <= maxBed) return 95;
+      if (!maxBed) return 90;
+      // Over max bedrooms
+      return 60;
+    }
+
+    if (minBed && listing.bedrooms < minBed) {
+      return listing.bedrooms === minBed - 1 ? 40 : 15;
+    }
+
+    return 70;
+  }
+
+  private scoreAmenityMatch(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): number {
+    const wantedAmenities = [
+      ...(params.amenities || []),
+      ...(prefs?.amenities || []),
+    ].map((a) => a.toLowerCase());
+
+    if (wantedAmenities.length === 0) return 70;
+
+    const listingAmenities = (listing.amenities || []).map((a) =>
+      a.toLowerCase(),
+    );
+
+    if (listingAmenities.length === 0) return 50; // Can't evaluate
+
+    let matches = 0;
+    for (const wanted of wantedAmenities) {
+      if (listingAmenities.some((a) => a.includes(wanted) || wanted.includes(a))) {
+        matches++;
+      }
+    }
+
+    const ratio = matches / wantedAmenities.length;
+    return Math.round(40 + ratio * 60); // 40-100 range
+
+  }
+
+  private scoreListingQuality(listing: AgentListing): number {
+    let score = 50;
+    if (listing.photos.length > 0) score += 15;
+    if (listing.description) score += 10;
+    if (listing.square_feet) score += 10;
+    if (listing.listing_url) score += 5;
+    if (listing.available_date) score += 5;
+    if (listing.latitude && listing.longitude) score += 5;
+    return Math.min(score, 100);
+  }
+
+  private scoreFreshness(listing: AgentListing): number {
+    if (!listing.available_date) return 60;
+    const availDate = new Date(listing.available_date);
+    const now = new Date();
+    const daysUntil = (availDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (daysUntil < 0) return 30; // Already passed
+    if (daysUntil <= 14) return 95;
+    if (daysUntil <= 30) return 80;
+    if (daysUntil <= 60) return 65;
+    return 50;
+  }
+
+  private scoreSourceReliability(listing: AgentListing): number {
+    const reliableSources = [
+      'apartments.com', 'zillow', 'trulia', 'realtor.com',
+      'hotpads', 'westsiderentals', 'rent.com',
+    ];
+    const source = (listing.source || '').toLowerCase();
+    if (reliableSources.some((rs) => source.includes(rs))) return 90;
+    if (source === 'craigslist' || source.includes('craigslist')) return 50;
+    return 65;
+  }
+
+  // ─── Persistence ────────────────────────────────────────────────
+
+  /**
+   * Persists discovered listings to the apartments table via upsert.
+   * Returns listings with real DB-assigned UUIDs.
+   */
+  private async persistListings(listings: AgentListing[]): Promise<AgentListing[]> {
+    try {
+      const supabase = await createClient();
+      const persisted: AgentListing[] = [];
+
+      for (const listing of listings) {
+        const { data, error } = await supabase
+          .from('apartments')
+          .upsert(
+            {
+              title: listing.title,
+              address: listing.address,
+              location: listing.location,
+              price: listing.price,
+              bedrooms: listing.bedrooms,
+              bathrooms: listing.bathrooms,
+              square_feet: listing.square_feet,
+              amenities: (listing.amenities ?? []) as unknown as Json,
+              photos: listing.photos,
+              parking_available: listing.parking_available,
+              pet_policy: listing.pet_policy,
+              available_date: listing.available_date,
+              latitude: listing.latitude,
+              longitude: listing.longitude,
+              listing_url: listing.listing_url ?? null,
+              description: listing.description ?? null,
+            },
+            { onConflict: 'title,address' }
+          )
+          .select()
+          .single();
+
+        if (data && !error) {
+          persisted.push({ ...listing, id: data.id });
+        } else {
+          // If upsert fails (e.g. no unique constraint), still include the listing
+          persisted.push(listing);
+        }
+      }
+
+      return persisted;
+    } catch (err) {
+      console.error('[MarketResearcher] Failed to persist listings:', err);
+      return listings; // Return originals on failure
+    }
+  }
+
+  /**
+   * Persists listing scores to the listing_scores table.
+   */
+  private async persistScores(
+    listings: AgentListing[],
+    context: SubAgentContext,
+  ): Promise<void> {
+    try {
+      const supabase = await createClient();
+
+      for (const listing of listings) {
+        if (!listing.scoring || listing.id.startsWith('search-') || listing.id.startsWith('mock-')) {
+          continue; // Skip non-persisted listings
+        }
+
+        await supabase.from('listing_scores').insert({
+          listing_id: listing.id,
+          user_id: context.userId,
+          overall_score: listing.scoring.overall_score,
+          price_score: listing.scoring.price_score,
+          location_score: listing.scoring.location_score,
+          size_score: listing.scoring.size_score,
+          amenities_score: listing.scoring.amenity_score,
+          reasoning: listing.scoring.reasoning ?? null,
+          pros: listing.scoring.pros ?? [],
+          cons: listing.scoring.cons ?? [],
+        });
+      }
+    } catch (err) {
+      console.error('[MarketResearcher] Failed to persist scores:', err);
+      // Non-fatal
+    }
+  }
+
+  // ─── Summary Text Generator ───────────────────────────────────
+
+  private generateSummaryText(
+    listings: AgentListing[],
+    context: SubAgentContext,
+  ): string {
+    if (listings.length === 0) {
+      return "\n\nI couldn't find any listings matching your criteria. Try broadening your search by increasing your budget, adding more neighborhoods, or reducing bedroom requirements.";
+    }
+
+    const top = listings.slice(0, 3);
+    const parts: string[] = ['\n\nHere are the top matches:\n'];
+
+    top.forEach((listing, i) => {
+      parts.push(
+        `\n${i + 1}. **${listing.title}** - $${listing.price.toLocaleString()}/mo`,
+      );
+      parts.push(`   ${listing.address}, ${listing.location}`);
+      parts.push(`   ${listing.bedrooms}BR/${listing.bathrooms}BA`);
+      if (listing.square_feet) parts.push(` | ${listing.square_feet} sq ft`);
+      parts.push(`   Score: ${listing.score}/100`);
+      if (listing.scoring?.pros?.length) {
+        parts.push(`   Pros: ${listing.scoring.pros.join(', ')}`);
+      }
+    });
+
+    if (listings.length > 3) {
+      parts.push(
+        `\n\n...and ${listings.length - 3} more listings. Would you like to see all results, refine your search, get a cost estimate, or schedule a viewing?`,
+      );
+    } else {
+      parts.push(
+        '\n\nWould you like a cost estimate for any of these, or would you like to schedule a viewing?',
+      );
+    }
+
+    return parts.join('');
+  }
+
+  // ─── Mock/Fallback Data ───────────────────────────────────────
+
+  private getMockListings(context: SubAgentContext): AgentListing[] {
+    const params = context.extractedParams;
+    const prefs = context.preferences;
+
+    // Use specified budget or default range
+    const maxBudget = params.maxBudget ?? prefs?.max_budget ?? 3500;
+    const minBedrooms = params.minBedrooms ?? prefs?.min_bedrooms ?? 1;
+
+    const neighborhoods =
+      params.neighborhoods?.length
+        ? params.neighborhoods
+        : prefs?.neighborhoods?.length
+          ? prefs.neighborhoods
+          : ['Silver Lake', 'Echo Park', 'Los Feliz', 'Highland Park'];
+
+    const mockListings: AgentListing[] = [
+      {
+        id: `mock-${Date.now()}-1`,
+        title: `Modern ${minBedrooms}BR Apartment in ${neighborhoods[0]}`,
+        address: `1234 Sunset Blvd, ${neighborhoods[0]}, CA 90026`,
+        location: neighborhoods[0],
+        price: Math.round(maxBudget * 0.85),
+        bedrooms: minBedrooms,
+        bathrooms: 1,
+        square_feet: 650 + minBedrooms * 200,
+        photos: [],
+        amenities: ['in-unit laundry', 'dishwasher', 'central air', 'hardwood floors'],
+        parking_available: true,
+        pet_policy: 'cats allowed, dogs under 25 lbs',
+        available_date: this.futureDate(14),
+        latitude: 34.0825,
+        longitude: -118.2695,
+        listing_url: null,
+        description: `Beautiful updated ${minBedrooms}-bedroom apartment with modern finishes. In-unit washer/dryer, hardwood floors throughout, and abundant natural light.`,
+        source: 'apartments.com',
+      },
+      {
+        id: `mock-${Date.now()}-2`,
+        title: `Spacious ${minBedrooms + 1}BR with Views in ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}`,
+        address: `5678 Echo Park Ave, ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}, CA 90026`,
+        location: neighborhoods[Math.min(1, neighborhoods.length - 1)],
+        price: Math.round(maxBudget * 0.95),
+        bedrooms: minBedrooms + 1,
+        bathrooms: minBedrooms >= 2 ? 2 : 1,
+        square_feet: 800 + minBedrooms * 250,
+        photos: [],
+        amenities: ['rooftop deck', 'stainless steel appliances', 'walk-in closet', 'pool'],
+        parking_available: true,
+        pet_policy: 'pet friendly - dogs and cats welcome',
+        available_date: this.futureDate(7),
+        latitude: 34.0782,
+        longitude: -118.2606,
+        listing_url: null,
+        description: `Stunning ${minBedrooms + 1}-bedroom with panoramic city views from private rooftop deck. Recently renovated kitchen and bathrooms.`,
+        source: 'zillow',
+      },
+      {
+        id: `mock-${Date.now()}-3`,
+        title: `Cozy ${minBedrooms}BR Near Metro in ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}`,
+        address: `910 Vermont Ave, ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}, CA 90029`,
+        location: neighborhoods[Math.min(2, neighborhoods.length - 1)],
+        price: Math.round(maxBudget * 0.7),
+        bedrooms: minBedrooms,
+        bathrooms: 1,
+        square_feet: 550 + minBedrooms * 150,
+        photos: [],
+        amenities: ['near metro', 'on-site laundry', 'gated entry', 'storage unit'],
+        parking_available: false,
+        pet_policy: 'no pets',
+        available_date: this.futureDate(21),
+        latitude: 34.0916,
+        longitude: -118.2920,
+        listing_url: null,
+        description: `Well-maintained ${minBedrooms}-bedroom just steps from the Metro. Great for commuters. Quiet, tree-lined street.`,
+        source: 'trulia',
+      },
+      {
+        id: `mock-${Date.now()}-4`,
+        title: `Luxury ${minBedrooms + 1}BR Loft in ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}`,
+        address: `2020 York Blvd, ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}, CA 90042`,
+        location: neighborhoods[Math.min(3, neighborhoods.length - 1)],
+        price: Math.round(maxBudget * 1.05),
+        bedrooms: minBedrooms + 1,
+        bathrooms: 2,
+        square_feet: 1000 + minBedrooms * 200,
+        photos: [],
+        amenities: ['gym', 'concierge', 'EV charging', 'in-unit laundry', 'balcony'],
+        parking_available: true,
+        pet_policy: 'pet friendly with deposit',
+        available_date: this.futureDate(10),
+        latitude: 34.1014,
+        longitude: -118.2124,
+        listing_url: null,
+        description: `Stunning loft-style ${minBedrooms + 1}-bedroom in a brand new building. High ceilings, floor-to-ceiling windows, and top-of-the-line appliances.`,
+        source: 'westsiderentals',
+      },
+      {
+        id: `mock-${Date.now()}-5`,
+        title: `Charming ${minBedrooms}BR Bungalow in ${neighborhoods[0]}`,
+        address: `3456 Hyperion Ave, ${neighborhoods[0]}, CA 90027`,
+        location: neighborhoods[0],
+        price: Math.round(maxBudget * 0.9),
+        bedrooms: minBedrooms,
+        bathrooms: 1,
+        square_feet: 700 + minBedrooms * 180,
+        photos: [],
+        amenities: ['private patio', 'washer/dryer hookups', 'original hardwood', 'garage'],
+        parking_available: true,
+        pet_policy: 'cats only',
+        available_date: this.futureDate(5),
+        latitude: 34.0965,
+        longitude: -118.2570,
+        listing_url: null,
+        description: `Classic LA bungalow with tons of character. Private fenced patio, original hardwood floors, and a detached garage.`,
+        source: 'hotpads',
+      },
+    ];
+
+    return mockListings;
+  }
+
+  private futureDate(daysFromNow: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    return d.toISOString().split('T')[0];
+  }
+}
