@@ -43,6 +43,13 @@ fi
 
 # --- 3. Swap the current symlink (atomic) ---
 echo "[3/5] Activating new release..."
+
+# If current is a real directory (not a symlink), remove it first.
+# ln -sfn cannot atomically replace a directory — only a symlink.
+if [ -d "${CURRENT_DIR}" ] && [ ! -L "${CURRENT_DIR}" ]; then
+  rm -rf "${CURRENT_DIR}"
+fi
+
 ln -sfn "${RELEASE_DIR}" "${CURRENT_DIR}"
 echo "  current -> ${RELEASE_DIR}"
 
