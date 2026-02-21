@@ -1,0 +1,122 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  APP_DIR: /var/www/la-rent-finder
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Lint and Type-check
+  # ──────────────────────────────────────────────
+  quality:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript type check
+        run: npx tsc --noEmit
+
+  # ──────────────────────────────────────────────
+  # Job 2: Build and Deploy
+  # ──────────────────────────────────────────────
+  deploy:
+    name: Build & Deploy
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js (standalone)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: npm run build
+
+      - name: Prepare deployment package
+        run: |
+          mkdir -p deploy-package
+
+          # Copy standalone build (server.js + minimal node_modules)
+          cp -a .next/standalone/. deploy-package/
+
+          # Copy static assets into standalone structure
+          mkdir -p deploy-package/.next/static
+          cp -a .next/static/. deploy-package/.next/static/
+
+          # Copy public directory if it exists
+          if [ -d "public" ]; then
+            cp -a public/. deploy-package/public/
+          fi
+
+          # Copy PM2 ecosystem config
+          cp ecosystem.config.cjs deploy-package/
+
+          # Copy deploy script
+          mkdir -p deploy-package/scripts
+          cp scripts/deploy.sh deploy-package/scripts/
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload artifacts to VPS
+        run: |
+          rsync -azP --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            deploy-package/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ env.APP_DIR }}/staging/
+
+      - name: Execute deployment on VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'bash /var/www/la-rent-finder/staging/scripts/deploy.sh'
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'curl -sf http://localhost:3001 > /dev/null && echo "Health check passed" || (echo "Health check FAILED" && exit 1)'
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

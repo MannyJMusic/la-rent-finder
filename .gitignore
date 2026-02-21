@@ -100,3 +100,6 @@ secrets.json
 
 # Next.js
 .vercel/
+
+# Deployment artifacts
+deploy-package/
