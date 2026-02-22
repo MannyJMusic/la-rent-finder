@@ -5,14 +5,16 @@ import { ApiClient } from '@/lib/crawl/api-client';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-// ─── Types for Realty in US v3 response ──────────────────────
+// ─── Types for Realty in US v3 responses ─────────────────────
 
 interface RealtyPhoto {
   href?: string;
 }
 
-interface RealtyResult {
+interface RealtyListResult {
   property_id?: string;
+  primary_photo?: RealtyPhoto;
+  photo_count?: number;
   location?: {
     address?: {
       line?: string;
@@ -22,21 +24,33 @@ interface RealtyResult {
       };
     };
   };
-  list_price?: number;
   description?: {
     beds?: number;
     baths?: number;
   };
-  photos?: RealtyPhoto[];
 }
 
-interface RealtyApiResponse {
+interface RealtyListResponse {
   data?: {
     home_search?: {
-      results?: RealtyResult[];
+      results?: RealtyListResult[];
     };
   };
 }
+
+interface RealtyGetPhotosResponse {
+  data?: {
+    home_search?: {
+      results?: Array<{
+        property_id?: string;
+        photos?: RealtyPhoto[];
+      }>;
+    };
+  };
+}
+
+const RAPIDAPI_HOST = 'realty-in-us.p.rapidapi.com';
+const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
 
 // ─── Haversine distance (miles) ──────────────────────────────
 
@@ -46,7 +60,7 @@ function haversineDistanceMiles(
   lat2: number,
   lon2: number,
 ): number {
-  const R = 3958.8; // Earth radius in miles
+  const R = 3958.8;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
@@ -60,7 +74,6 @@ function haversineDistanceMiles(
 // ─── Handler ─────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  // Auth: CRON_SECRET bearer token or authenticated user
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get('authorization');
 
@@ -85,9 +98,13 @@ export async function POST(request: NextRequest) {
   }
 
   const batchLimit = Math.min(body.limit ?? 50, 200);
+  const apiHeaders = {
+    'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
+    'X-RapidAPI-Host': RAPIDAPI_HOST,
+  };
 
   try {
-    // Fetch properties without photos, grouped by zip code
+    // Fetch properties without photos
     const { data: properties, error } = await supabase
       .from('properties')
       .select('id, address, latitude, longitude, price, bedrooms, bathrooms')
@@ -109,7 +126,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Extract unique zip codes from addresses
+    // Group by zip code
     const zipMap = new Map<string, typeof properties>();
     for (const prop of properties) {
       const zipMatch = prop.address?.match(/\b(\d{5})\b/);
@@ -126,56 +143,49 @@ export async function POST(request: NextRequest) {
 
     for (const [zip, propsInZip] of zipMap) {
       try {
-        // Search Realty in US for this zip code
-        const requestBody = {
-          status: ['for_rent'],
-          limit: 200,
-          offset: 0,
-          postal_code: zip,
-          sort: { direction: 'desc', field: 'list_date' },
-        };
-
-        const response = await client.fetchJson<RealtyApiResponse>(
-          'https://realtor.p.rapidapi.com/properties/v3/list',
+        // Step 1: Search Realty in US for this zip to find nearby properties
+        const listResponse = await client.fetchJson<RealtyListResponse>(
+          `${RAPIDAPI_BASE}/properties/v3/list`,
           {
             method: 'POST',
-            headers: {
-              'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
-              'X-RapidAPI-Host': 'realtor.p.rapidapi.com',
+            headers: apiHeaders,
+            body: {
+              status: ['for_rent'],
+              limit: 200,
+              offset: 0,
+              postal_code: zip,
+              sort: { direction: 'desc', field: 'list_date' },
             },
-            body: requestBody,
             adapterName: 'RealtyEnrich',
             delayBetweenRequests: 6000,
           },
         );
 
         searched++;
-
-        const realtyResults = response.data?.data?.home_search?.results ?? [];
+        const realtyResults =
+          listResponse.data?.data?.home_search?.results ?? [];
         if (realtyResults.length === 0) continue;
 
-        // For each property without photos, find the closest Realty in US match
+        // Step 2: For each property, find the closest match and get photos
         for (const prop of propsInZip) {
           const lat = Number(prop.latitude);
           const lon = Number(prop.longitude);
           if (isNaN(lat) || isNaN(lon)) continue;
 
-          let bestMatch: RealtyResult | null = null;
+          let bestMatch: RealtyListResult | null = null;
           let bestDistance = Infinity;
 
           for (const result of realtyResults) {
             const rLat = result.location?.address?.coordinate?.lat;
             const rLon = result.location?.address?.coordinate?.lon;
             if (rLat == null || rLon == null) continue;
+            if (!result.property_id) continue;
 
-            // Must have photos
-            const photos = (result.photos ?? []).filter((p) => p.href);
-            if (photos.length === 0) continue;
+            // Must have photos available
+            if (!result.photo_count && !result.primary_photo?.href) continue;
 
-            // Must be within 0.1 miles (~530 feet)
             const dist = haversineDistanceMiles(lat, lon, rLat, rLon);
             if (dist < bestDistance && dist < 0.1) {
-              // Also check bedroom count matches if available
               const bedsMatch =
                 prop.bedrooms == null ||
                 result.description?.beds == null ||
@@ -187,30 +197,62 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (bestMatch) {
-            const photos = (bestMatch.photos ?? [])
+          if (!bestMatch?.property_id) continue;
+
+          // Step 3: Fetch full photos via get-photos endpoint
+          try {
+            const photosResponse =
+              await client.fetchJson<RealtyGetPhotosResponse>(
+                `${RAPIDAPI_BASE}/properties/v3/get-photos?property_id=${bestMatch.property_id}`,
+                {
+                  headers: apiHeaders,
+                  adapterName: 'RealtyEnrich',
+                  delayBetweenRequests: 2000,
+                },
+              );
+
+            const photoResults =
+              photosResponse.data?.data?.home_search?.results ?? [];
+            const fullPhotos = (photoResults[0]?.photos ?? [])
               .map((p) => p.href)
               .filter((h): h is string => Boolean(h));
+
+            // Fall back to primary_photo if get-photos returned nothing
+            const photos =
+              fullPhotos.length > 0
+                ? fullPhotos
+                : bestMatch.primary_photo?.href
+                  ? [bestMatch.primary_photo.href]
+                  : [];
 
             if (photos.length > 0) {
               const { error: updateError } = await supabase
                 .from('properties')
-                .update({
-                  photos,
-                  source_urls: [
-                    `https://www.realtor.com/realestateandhomes-detail/${bestMatch.property_id ?? ''}`,
-                  ],
-                })
+                .update({ photos })
                 .eq('id', prop.id);
 
               if (updateError) {
-                errors.push(`Failed to update ${prop.id}: ${updateError.message}`);
+                errors.push(
+                  `Failed to update ${prop.id}: ${updateError.message}`,
+                );
               } else {
                 enriched++;
                 console.log(
                   `[PhotoEnrich] Matched ${prop.address} → ${photos.length} photos (${bestDistance.toFixed(3)} mi)`,
                 );
               }
+            }
+          } catch (photoErr) {
+            // If get-photos fails, fall back to primary_photo
+            if (bestMatch.primary_photo?.href) {
+              await supabase
+                .from('properties')
+                .update({ photos: [bestMatch.primary_photo.href] })
+                .eq('id', prop.id);
+              enriched++;
+              console.log(
+                `[PhotoEnrich] Fallback: ${prop.address} → 1 primary photo`,
+              );
             }
           }
         }

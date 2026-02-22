@@ -63,6 +63,8 @@ interface RealtyPhoto {
 interface RealtyResult {
   property_id?: string;
   href?: string;
+  photo_count?: number;
+  primary_photo?: RealtyPhoto;
   location?: {
     address?: {
       line?: string;
@@ -76,6 +78,8 @@ interface RealtyResult {
     };
   };
   list_price?: number;
+  list_price_min?: number;
+  list_price_max?: number;
   description?: {
     beds?: number;
     baths?: number;
@@ -83,6 +87,7 @@ interface RealtyResult {
     type?: string;
     text?: string;
   };
+  pet_policy?: string;
   photos?: RealtyPhoto[];
 }
 
@@ -100,8 +105,7 @@ interface RealtyApiResponse {
 class RealtyInUsAdapter implements ApiSourceAdapter {
   config: SourceAdapterConfig = {
     name: 'realty_in_us',
-    // The "Realtor" API on RapidAPI (replaces deprecated realty-in-us host)
-    baseUrl: 'https://realtor.p.rapidapi.com',
+    baseUrl: 'https://realty-in-us.p.rapidapi.com',
     reliability: 95,
     requestsPerMinute: 10,
     delayBetweenRequests: 6000,
@@ -173,7 +177,7 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
           method: 'POST',
           headers: {
             'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
-            'X-RapidAPI-Host': 'realtor.p.rapidapi.com',
+            'X-RapidAPI-Host': 'realty-in-us.p.rapidapi.com',
           },
           body: requestBody,
           adapterName: 'RealtyInUs',
@@ -223,22 +227,36 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
           addr?.postal_code,
         ].filter(Boolean);
 
+        // Photos: use full photos[] if available, otherwise primary_photo
+        const fullPhotos = (result.photos ?? [])
+          .map((p) => p.href)
+          .filter((h): h is string => Boolean(h));
+        const photos = fullPhotos.length > 0
+          ? fullPhotos
+          : result.primary_photo?.href
+            ? [result.primary_photo.href]
+            : [];
+
+        // Price: list_price, or midpoint of min/max range
+        const price = result.list_price
+          ?? (result.list_price_min && result.list_price_max
+            ? Math.round((result.list_price_min + result.list_price_max) / 2)
+            : result.list_price_min ?? result.list_price_max ?? null);
+
         const listing: RawListing = {
           sourceId: result.property_id ?? null,
           sourceName: 'realty_in_us',
           sourceUrl: result.href ?? `https://www.realtor.com/realestateandhomes-detail/${result.property_id ?? ''}`,
           title: addr?.line ?? `Rental in ${addr?.city ?? 'Los Angeles'}`,
           address: addressParts.length > 0 ? addressParts.join(', ') : null,
-          price: result.list_price ?? null,
+          price,
           bedrooms: result.description?.beds ?? null,
           bathrooms: result.description?.baths ?? null,
           sqft: result.description?.sqft ?? null,
           description: result.description?.text ?? null,
-          photos: (result.photos ?? [])
-            .map((p) => p.href)
-            .filter((h): h is string => Boolean(h)),
+          photos,
           amenities: [],
-          petPolicy: null,
+          petPolicy: result.pet_policy ?? null,
           parking: null,
           availableDate: null,
           latitude: addr?.coordinate?.lat ?? null,
