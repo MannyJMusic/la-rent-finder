@@ -87,7 +87,7 @@ interface RealtyResult {
     type?: string;
     text?: string;
   };
-  pet_policy?: string;
+  pet_policy?: unknown;
   photos?: RealtyPhoto[];
 }
 
@@ -256,7 +256,11 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
           description: result.description?.text ?? null,
           photos,
           amenities: [],
-          petPolicy: result.pet_policy ?? null,
+          petPolicy: typeof result.pet_policy === 'string'
+            ? result.pet_policy
+            : result.pet_policy != null
+              ? JSON.stringify(result.pet_policy)
+              : null,
           parking: null,
           availableDate: null,
           latitude: addr?.coordinate?.lat ?? null,
