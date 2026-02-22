@@ -10,6 +10,15 @@
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
+    },
+    "hostinger-mcp": {
+      "command": "npx",
+      "args": [
+        "hostinger-api-mcp@latest"
+      ],
+      "env": {
+        "API_TOKEN": "MkdRFqlXBtHYMcA2y00ZRq6hbyb3nUwobirqPVky2c4cd900"
+      }
     }
   }
 }

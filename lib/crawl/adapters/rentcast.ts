@@ -14,6 +14,7 @@ const LA_NEIGHBORHOOD_COORDS: Record<string, { lat: number; lon: number }> = {
   'echo park': { lat: 34.0781, lon: -118.2606 },
   'los feliz': { lat: 34.1083, lon: -118.2881 },
   'hollywood': { lat: 34.0928, lon: -118.3287 },
+  'east hollywood': { lat: 34.0917, lon: -118.2948 },
   'west hollywood': { lat: 34.0900, lon: -118.3617 },
   'santa monica': { lat: 34.0195, lon: -118.4912 },
   'venice': { lat: 33.9850, lon: -118.4695 },

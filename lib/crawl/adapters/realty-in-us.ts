@@ -14,6 +14,7 @@ const LA_NEIGHBORHOOD_ZIPS: Record<string, string[]> = {
   'echo park': ['90026'],
   'los feliz': ['90027'],
   'hollywood': ['90028', '90038'],
+  'east hollywood': ['90027', '90029'],
   'west hollywood': ['90046', '90048', '90069'],
   'santa monica': ['90401', '90402', '90403', '90404', '90405'],
   'venice': ['90291'],
