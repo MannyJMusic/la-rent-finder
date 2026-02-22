@@ -25,6 +25,12 @@ export async function GET(request: NextRequest) {
   try {
     let query = supabase.from('properties').select('*', { count: 'exact' });
 
+    // Default to showing only active listings
+    const is_active = searchParams.get('is_active');
+    if (is_active !== 'false') {
+      query = query.eq('is_active', true);
+    }
+
     if (price_min) {
       query = query.gte('price', parseFloat(price_min));
     }
@@ -52,6 +58,16 @@ export async function GET(request: NextRequest) {
         query = query.eq('property_type', types[0]);
       } else if (types.length > 1) {
         query = query.in('property_type', types);
+      }
+    }
+
+    const source_name = searchParams.get('source_name');
+    if (source_name) {
+      const sources = source_name.split(',').map(s => s.trim()).filter(Boolean);
+      if (sources.length === 1) {
+        query = query.eq('source_name', sources[0]);
+      } else if (sources.length > 1) {
+        query = query.in('source_name', sources);
       }
     }
 

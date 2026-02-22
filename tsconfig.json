@@ -37,6 +37,7 @@
   ],
   "exclude": [
     "node_modules",
-    "supabase/test_connection.ts"
+    "supabase/test_connection.ts",
+    "supabase/functions"
   ]
 }

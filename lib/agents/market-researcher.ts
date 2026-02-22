@@ -2,14 +2,12 @@
  * Market Researcher Agent
  *
  * Receives search criteria from the orchestrator and:
- *  1. Builds a search query from user preferences and extracted params
- *  2. Uses Claude with web_search tool to find rental listings online
- *  3. Normalizes discovered listings into the standard AgentListing format
- *  4. Scores each listing (1-100) based on user preferences
- *  5. Returns scored, ranked listings
+ *  1. Queries the properties table for matching active listings
+ *  2. If insufficient results, triggers on-demand crawl via CrawlEngine
+ *  3. Scores each listing (1-100) based on user preferences
+ *  4. Returns scored, ranked listings
  *
- * Includes a mock/fallback mode that returns sample LA listings
- * when the API calls fail or for development purposes.
+ * Falls back to Claude web_search when crawl infrastructure is unavailable.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -30,6 +28,7 @@ import type {
 } from './types';
 import { createClient } from '@/lib/supabase/server';
 import type { Json, PropertyType } from '@/lib/database.types';
+import type { CrawlSearchParams } from '@/lib/crawl';
 
 // ─── Configuration ──────────────────────────────────────────────
 
@@ -88,61 +87,56 @@ export class MarketResearcherAgent extends BaseAgent {
   }
 
   async *execute(context: SubAgentContext): AsyncGenerator<StreamEvent> {
+    const params = context.extractedParams;
+    const preferences = context.preferences;
+
     yield this.statusEvent('searching');
+    yield* streamText('Searching for properties...', this.name, 20);
 
-    // Build search query from context
-    const searchQuery = this.buildSearchQuery(context);
+    // Step 1: Query existing listings from the database
+    let listings = await this.queryExistingListings(params, preferences);
 
-    yield* streamText(
-      `Searching for properties: ${searchQuery}...`,
-      this.name,
-      20,
-    );
+    // Step 2: If insufficient results, trigger on-demand crawl
+    if (listings.length < 5) {
+      yield this.statusEvent('searching');
+      yield* streamText(
+        '\n\nSearching rental sites for new listings...',
+        this.name,
+        20,
+      );
 
-    // Attempt web search via Claude
-    let rawListings: AgentListing[];
-
-    try {
-      rawListings = await this.searchListings(searchQuery, context);
-    } catch (err) {
-      console.error('[MarketResearcher] Web search failed, using fallback:', err);
-      // Fall back to mock data
-      rawListings = this.getMockListings(context);
-    }
-
-    if (rawListings.length === 0) {
-      // Use mock data if no results found
-      rawListings = this.getMockListings(context);
+      try {
+        await this.crawlOnDemand(params, preferences);
+        // Re-query to get fresh + existing results
+        listings = await this.queryExistingListings(params, preferences);
+      } catch (err) {
+        console.error('[MarketResearcher] On-demand crawl failed:', err);
+        // Continue with whatever listings we have
+      }
     }
 
     yield this.statusEvent('analyzing');
-
     yield* streamText(
-      `\n\nFound ${rawListings.length} listings. Scoring and ranking them based on your preferences...`,
+      `\n\nFound ${listings.length} listings. Scoring and ranking them based on your preferences...`,
       this.name,
       20,
     );
 
-    // Persist listings to the properties table
-    const persistedListings = await this.persistListings(rawListings);
-
-    // Score listings
-    const scoredListings = this.scoreListings(persistedListings, context);
-
-    // Sort by score descending
+    // Step 3: Score and rank all results
+    const scoredListings = this.scoreListings(listings, context);
     scoredListings.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
     // Persist scores to listing_scores table
     await this.persistScores(scoredListings, context);
 
-    // Emit listings event
+    // Step 4: Emit listings event
     yield {
       type: 'listings',
       listings: scoredListings,
       agentName: this.name,
     };
 
-    // Generate summary text
+    // Step 5: Stream summary
     const summary = this.generateSummaryText(scoredListings, context);
     yield* streamText(summary, this.name, 20);
   }
@@ -245,6 +239,143 @@ export class MarketResearcherAgent extends BaseAgent {
     const fullText = textBlocks.map((b) => b.text).join('\n');
 
     return this.parseListingsFromResponse(fullText);
+  }
+
+  // ─── Database Query ─────────────────────────────────────────────
+
+  private async queryExistingListings(
+    params: ExtractedParams,
+    preferences: UserPreferencesData | null | undefined,
+  ): Promise<AgentListing[]> {
+    const supabase = await createClient();
+
+    let query = supabase.from('properties').select('*').eq('is_active', true);
+
+    // Filter by property type
+    const propertyTypes = params.propertyTypes?.length
+      ? params.propertyTypes
+      : preferences?.property_types?.length
+        ? preferences.property_types
+        : null;
+    if (propertyTypes && propertyTypes.length > 0) {
+      query = query.in('property_type', propertyTypes);
+    }
+
+    // Filter by price
+    const maxBudget = params.maxBudget ?? preferences?.max_budget;
+    const minBudget = params.minBudget ?? preferences?.min_budget;
+    if (maxBudget) query = query.lte('price', maxBudget);
+    if (minBudget) query = query.gte('price', minBudget);
+
+    // Filter by bedrooms
+    const minBed = params.minBedrooms ?? preferences?.min_bedrooms;
+    if (minBed) query = query.gte('bedrooms', minBed);
+
+    // Filter by neighborhood
+    const neighborhoods = params.neighborhoods?.length
+      ? params.neighborhoods
+      : preferences?.neighborhoods?.length
+        ? preferences.neighborhoods
+        : null;
+    if (neighborhoods && neighborhoods.length > 0) {
+      const neighborhoodFilter = neighborhoods.map(n => `location.ilike.%${n}%`).join(',');
+      query = query.or(neighborhoodFilter);
+    }
+
+    query = query.order('created_at', { ascending: false }).limit(20);
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+
+    return data.map(row => ({
+      id: row.id,
+      title: row.title,
+      address: row.address,
+      location: row.location,
+      price: row.price,
+      bedrooms: row.bedrooms,
+      bathrooms: row.bathrooms,
+      square_feet: row.square_feet,
+      photos: row.photos ?? [],
+      amenities: Array.isArray(row.amenities) ? row.amenities as string[] : [],
+      parking_available: row.parking_available ?? false,
+      pet_policy: row.pet_policy,
+      available_date: row.available_date,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      listing_url: row.listing_url,
+      description: row.description,
+      source: row.source_name ?? 'database',
+      property_type: row.property_type,
+    }));
+  }
+
+  // ─── On-Demand Crawl ─────────────────────────────────────────────
+
+  private async crawlOnDemand(
+    params: ExtractedParams,
+    preferences: UserPreferencesData | null | undefined,
+  ): Promise<AgentListing[]> {
+    const { crawlEngine, allAdapters, normalizeRawListing, findDuplicates, mergeWithExisting, persistNewListing } = await import('@/lib/crawl');
+    const supabase = await createClient();
+
+    const crawlParams: CrawlSearchParams = {
+      neighborhoods: params.neighborhoods?.length
+        ? params.neighborhoods
+        : preferences?.neighborhoods ?? undefined,
+      propertyTypes: (params.propertyTypes?.length
+        ? params.propertyTypes
+        : preferences?.property_types?.length
+          ? preferences.property_types
+          : undefined) as PropertyType[] | undefined,
+      minPrice: params.minBudget ?? preferences?.min_budget ?? undefined,
+      maxPrice: params.maxBudget ?? preferences?.max_budget ?? undefined,
+      minBedrooms: params.minBedrooms ?? preferences?.min_bedrooms ?? undefined,
+    };
+
+    const newListings: AgentListing[] = [];
+
+    for (const adapter of allAdapters) {
+      try {
+        const result = await crawlEngine.crawlSearchResults(adapter, crawlParams);
+
+        for (const rawListing of result.listings) {
+          const normalized = normalizeRawListing(rawListing);
+          const duplicate = await findDuplicates(normalized, supabase);
+
+          if (duplicate) {
+            await mergeWithExisting(duplicate.existing, normalized, supabase);
+          } else {
+            const newId = await persistNewListing(normalized, supabase);
+            newListings.push({
+              id: newId,
+              title: normalized.title,
+              address: normalized.address,
+              location: normalized.location,
+              price: normalized.price,
+              bedrooms: normalized.bedrooms,
+              bathrooms: normalized.bathrooms,
+              square_feet: normalized.square_feet,
+              photos: normalized.photos,
+              amenities: normalized.amenities,
+              parking_available: normalized.parking_available,
+              pet_policy: normalized.pet_policy,
+              available_date: normalized.available_date,
+              latitude: normalized.latitude,
+              longitude: normalized.longitude,
+              listing_url: normalized.listing_url,
+              description: normalized.description,
+              source: normalized.source_name,
+              property_type: normalized.property_type,
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`[MarketResearcher] Crawl failed for ${adapter.config.name}:`, err);
+      }
+    }
+
+    return newListings;
   }
 
   // ─── Response Parser ──────────────────────────────────────────
@@ -685,146 +816,4 @@ export class MarketResearcherAgent extends BaseAgent {
     return parts.join('');
   }
 
-  // ─── Mock/Fallback Data ───────────────────────────────────────
-
-  private getMockListings(context: SubAgentContext): AgentListing[] {
-    const params = context.extractedParams;
-    const prefs = context.preferences;
-
-    // Use specified budget or default range
-    const maxBudget = params.maxBudget ?? prefs?.max_budget ?? 3500;
-    const minBedrooms = params.minBedrooms ?? prefs?.min_bedrooms ?? 1;
-
-    const neighborhoods =
-      params.neighborhoods?.length
-        ? params.neighborhoods
-        : prefs?.neighborhoods?.length
-          ? prefs.neighborhoods
-          : ['Silver Lake', 'Echo Park', 'Los Feliz', 'Highland Park'];
-
-    const propertyTypes =
-      params.propertyTypes?.length
-        ? params.propertyTypes
-        : prefs?.property_types?.length
-          ? prefs.property_types
-          : ['house'];
-    const primaryType = propertyTypes[0] || 'house';
-    const typeLabel = primaryType.charAt(0).toUpperCase() + primaryType.slice(1);
-
-    const mockListings: AgentListing[] = [
-      {
-        id: `mock-${Date.now()}-1`,
-        title: `Modern ${minBedrooms}BR ${typeLabel} in ${neighborhoods[0]}`,
-        address: `1234 Sunset Blvd, ${neighborhoods[0]}, CA 90026`,
-        location: neighborhoods[0],
-        price: Math.round(maxBudget * 0.85),
-        bedrooms: minBedrooms,
-        bathrooms: 1,
-        square_feet: 650 + minBedrooms * 200,
-        photos: [],
-        amenities: ['in-unit laundry', 'dishwasher', 'central air', 'hardwood floors'],
-        parking_available: true,
-        pet_policy: 'cats allowed, dogs under 25 lbs',
-        available_date: this.futureDate(14),
-        latitude: 34.0825,
-        longitude: -118.2695,
-        listing_url: null,
-        description: `Beautiful updated ${minBedrooms}-bedroom apartment with modern finishes. In-unit washer/dryer, hardwood floors throughout, and abundant natural light.`,
-        source: 'apartments.com',
-        property_type: primaryType,
-      },
-      {
-        id: `mock-${Date.now()}-2`,
-        title: `Spacious ${minBedrooms + 1}BR ${typeLabel} with Views in ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}`,
-        address: `5678 Echo Park Ave, ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}, CA 90026`,
-        location: neighborhoods[Math.min(1, neighborhoods.length - 1)],
-        price: Math.round(maxBudget * 0.95),
-        bedrooms: minBedrooms + 1,
-        bathrooms: minBedrooms >= 2 ? 2 : 1,
-        square_feet: 800 + minBedrooms * 250,
-        photos: [],
-        amenities: ['rooftop deck', 'stainless steel appliances', 'walk-in closet', 'pool'],
-        parking_available: true,
-        pet_policy: 'pet friendly - dogs and cats welcome',
-        available_date: this.futureDate(7),
-        latitude: 34.0782,
-        longitude: -118.2606,
-        listing_url: null,
-        description: `Stunning ${minBedrooms + 1}-bedroom with panoramic city views from private rooftop deck. Recently renovated kitchen and bathrooms.`,
-        source: 'zillow',
-        property_type: primaryType,
-      },
-      {
-        id: `mock-${Date.now()}-3`,
-        title: `Cozy ${minBedrooms}BR ${typeLabel} Near Metro in ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}`,
-        address: `910 Vermont Ave, ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}, CA 90029`,
-        location: neighborhoods[Math.min(2, neighborhoods.length - 1)],
-        price: Math.round(maxBudget * 0.7),
-        bedrooms: minBedrooms,
-        bathrooms: 1,
-        square_feet: 550 + minBedrooms * 150,
-        photos: [],
-        amenities: ['near metro', 'on-site laundry', 'gated entry', 'storage unit'],
-        parking_available: false,
-        pet_policy: 'no pets',
-        available_date: this.futureDate(21),
-        latitude: 34.0916,
-        longitude: -118.2920,
-        listing_url: null,
-        description: `Well-maintained ${minBedrooms}-bedroom just steps from the Metro. Great for commuters. Quiet, tree-lined street.`,
-        source: 'trulia',
-        property_type: primaryType,
-      },
-      {
-        id: `mock-${Date.now()}-4`,
-        title: `Luxury ${minBedrooms + 1}BR ${typeLabel} in ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}`,
-        address: `2020 York Blvd, ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}, CA 90042`,
-        location: neighborhoods[Math.min(3, neighborhoods.length - 1)],
-        price: Math.round(maxBudget * 1.05),
-        bedrooms: minBedrooms + 1,
-        bathrooms: 2,
-        square_feet: 1000 + minBedrooms * 200,
-        photos: [],
-        amenities: ['gym', 'concierge', 'EV charging', 'in-unit laundry', 'balcony'],
-        parking_available: true,
-        pet_policy: 'pet friendly with deposit',
-        available_date: this.futureDate(10),
-        latitude: 34.1014,
-        longitude: -118.2124,
-        listing_url: null,
-        description: `Stunning loft-style ${minBedrooms + 1}-bedroom in a brand new building. High ceilings, floor-to-ceiling windows, and top-of-the-line appliances.`,
-        source: 'westsiderentals',
-        property_type: primaryType,
-      },
-      {
-        id: `mock-${Date.now()}-5`,
-        title: `Charming ${minBedrooms}BR ${typeLabel} in ${neighborhoods[0]}`,
-        address: `3456 Hyperion Ave, ${neighborhoods[0]}, CA 90027`,
-        location: neighborhoods[0],
-        price: Math.round(maxBudget * 0.9),
-        bedrooms: minBedrooms,
-        bathrooms: 1,
-        square_feet: 700 + minBedrooms * 180,
-        photos: [],
-        amenities: ['private patio', 'washer/dryer hookups', 'original hardwood', 'garage'],
-        parking_available: true,
-        pet_policy: 'cats only',
-        available_date: this.futureDate(5),
-        latitude: 34.0965,
-        longitude: -118.2570,
-        listing_url: null,
-        description: `Classic LA bungalow with tons of character. Private fenced patio, original hardwood floors, and a detached garage.`,
-        source: 'hotpads',
-        property_type: primaryType,
-      },
-    ];
-
-    return mockListings;
-  }
-
-  private futureDate(daysFromNow: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() + daysFromNow);
-    return d.toISOString().split('T')[0];
-  }
 }
