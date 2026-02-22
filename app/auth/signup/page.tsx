@@ -16,6 +16,7 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -41,6 +42,7 @@ export default function SignUpPage() {
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             first_name: firstName,
             last_name: lastName,
@@ -56,12 +58,16 @@ export default function SignUpPage() {
 
       if (data.user) {
         setSuccess(true);
-        // If email confirmation is disabled, redirect to dashboard
-        // Otherwise, show success message
-        setTimeout(() => {
-          router.push('/dashboard');
-          router.refresh();
-        }, 2000);
+        if (data.user.identities?.length === 0 || !data.session) {
+          // Email confirmation is required — tell user to check their inbox
+          setNeedsConfirmation(true);
+        } else {
+          // Email confirmation is disabled — redirect to dashboard
+          setTimeout(() => {
+            router.push('/dashboard');
+            router.refresh();
+          }, 2000);
+        }
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
@@ -74,12 +80,21 @@ export default function SignUpPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8">
           <div className="rounded-md bg-green-50 p-4">
-            <div className="flex">
-              <div className="ml-3">
+            <div className="ml-3">
+              {needsConfirmation ? (
+                <>
+                  <h3 className="text-sm font-medium text-green-800">
+                    Account created! Check your email to verify your account.
+                  </h3>
+                  <p className="mt-2 text-sm text-green-700">
+                    We sent a confirmation link to <strong>{email}</strong>. Click the link to activate your account and access the dashboard.
+                  </p>
+                </>
+              ) : (
                 <h3 className="text-sm font-medium text-green-800">
                   Account created successfully! Redirecting to dashboard...
                 </h3>
-              </div>
+              )}
             </div>
           </div>
         </div>

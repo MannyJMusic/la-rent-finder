@@ -1,7 +1,7 @@
 'use client';
 
 import { User } from '@supabase/supabase-js';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { MessageSquare, Map, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import DashboardHeader from './DashboardHeader';
@@ -24,15 +24,15 @@ export default function DashboardLayout({ user }: DashboardLayoutProps) {
   const [chatListings, setChatListings] = useState<Listing[]>([]);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
 
-  // Check if mobile on mount
-  useState(() => {
+  // Check if mobile on mount and resize
+  useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  });
+  }, []);
 
   // Handle listings received from the chat SSE stream
   const handleListingsReceived = useCallback((listings: Listing[]) => {
