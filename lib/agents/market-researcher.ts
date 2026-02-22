@@ -3,11 +3,12 @@
  *
  * Receives search criteria from the orchestrator and:
  *  1. Queries the properties table for matching active listings
- *  2. If insufficient results, triggers on-demand crawl via CrawlEngine
- *  3. Scores each listing (1-100) based on user preferences
- *  4. Returns scored, ranked listings
+ *  2. If insufficient results, fetches from API sources (Realty in US, RentCast)
+ *  3. Falls back to Firecrawl scrapers if API sources yield < 5 results
+ *  4. Scores each listing (1-100) based on user preferences
+ *  5. Returns scored, ranked listings
  *
- * Falls back to Claude web_search when crawl infrastructure is unavailable.
+ * Falls back to Claude web_search when all crawl infrastructure is unavailable.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -316,7 +317,7 @@ export class MarketResearcherAgent extends BaseAgent {
     params: ExtractedParams,
     preferences: UserPreferencesData | null | undefined,
   ): Promise<AgentListing[]> {
-    const { crawlEngine, allAdapters, normalizeRawListing, findDuplicates, mergeWithExisting, persistNewListing } = await import('@/lib/crawl');
+    const { normalizeRawListing, findDuplicates, mergeWithExisting, persistNewListing } = await import('@/lib/crawl');
     const supabase = await createClient();
 
     const crawlParams: CrawlSearchParams = {
@@ -335,43 +336,71 @@ export class MarketResearcherAgent extends BaseAgent {
 
     const newListings: AgentListing[] = [];
 
-    for (const adapter of allAdapters) {
+    const processRawListings = async (listings: import('@/lib/crawl').RawListing[]) => {
+      for (const rawListing of listings) {
+        const normalized = normalizeRawListing(rawListing);
+        const duplicate = await findDuplicates(normalized, supabase);
+
+        if (duplicate) {
+          await mergeWithExisting(duplicate.existing, normalized, supabase);
+        } else {
+          const newId = await persistNewListing(normalized, supabase);
+          newListings.push({
+            id: newId,
+            title: normalized.title,
+            address: normalized.address,
+            location: normalized.location,
+            price: normalized.price,
+            bedrooms: normalized.bedrooms,
+            bathrooms: normalized.bathrooms,
+            square_feet: normalized.square_feet,
+            photos: normalized.photos,
+            amenities: normalized.amenities,
+            parking_available: normalized.parking_available,
+            pet_policy: normalized.pet_policy,
+            available_date: normalized.available_date,
+            latitude: normalized.latitude,
+            longitude: normalized.longitude,
+            listing_url: normalized.listing_url,
+            description: normalized.description,
+            source: normalized.source_name,
+            property_type: normalized.property_type,
+          });
+        }
+      }
+    };
+
+    // 1. Try API adapters first (faster, structured data)
+    try {
+      const { apiAdapters } = await import('@/lib/crawl/adapters/index');
+      for (const adapter of apiAdapters) {
+        if (!adapter.isConfigured()) continue;
+        try {
+          const result = await adapter.fetchListings(crawlParams);
+          await processRawListings(result.listings);
+          console.log(`[MarketResearcher] API sync ${adapter.config.name}: ${result.listings.length} listings`);
+        } catch (err) {
+          console.error(`[MarketResearcher] API sync failed for ${adapter.config.name}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error('[MarketResearcher] API adapters import failed:', err);
+    }
+
+    // 2. Fall back to Firecrawl scrapers if API yielded few results
+    if (newListings.length < 5) {
       try {
-        const result = await crawlEngine.crawlSearchResults(adapter, crawlParams);
-
-        for (const rawListing of result.listings) {
-          const normalized = normalizeRawListing(rawListing);
-          const duplicate = await findDuplicates(normalized, supabase);
-
-          if (duplicate) {
-            await mergeWithExisting(duplicate.existing, normalized, supabase);
-          } else {
-            const newId = await persistNewListing(normalized, supabase);
-            newListings.push({
-              id: newId,
-              title: normalized.title,
-              address: normalized.address,
-              location: normalized.location,
-              price: normalized.price,
-              bedrooms: normalized.bedrooms,
-              bathrooms: normalized.bathrooms,
-              square_feet: normalized.square_feet,
-              photos: normalized.photos,
-              amenities: normalized.amenities,
-              parking_available: normalized.parking_available,
-              pet_policy: normalized.pet_policy,
-              available_date: normalized.available_date,
-              latitude: normalized.latitude,
-              longitude: normalized.longitude,
-              listing_url: normalized.listing_url,
-              description: normalized.description,
-              source: normalized.source_name,
-              property_type: normalized.property_type,
-            });
+        const { crawlEngine, allAdapters } = await import('@/lib/crawl');
+        for (const adapter of allAdapters) {
+          try {
+            const result = await crawlEngine.crawlSearchResults(adapter, crawlParams);
+            await processRawListings(result.listings);
+          } catch (err) {
+            console.error(`[MarketResearcher] Crawl failed for ${adapter.config.name}:`, err);
           }
         }
       } catch (err) {
-        console.error(`[MarketResearcher] Crawl failed for ${adapter.config.name}:`, err);
+        console.error('[MarketResearcher] Firecrawl fallback failed:', err);
       }
     }
 
