@@ -244,43 +244,95 @@ export class MarketResearcherAgent extends BaseAgent {
 
   // ─── Database Query ─────────────────────────────────────────────
 
+  /**
+   * Query listings with progressive filter relaxation.
+   * If strict filters yield 0 results, relaxes filters in stages:
+   *   1. Full filters (type + price + bedrooms + neighborhood)
+   *   2. Drop property_type filter
+   *   3. Drop neighborhood filter
+   *   4. Drop bedroom filter
+   *   5. Only price ceiling (no min price)
+   *   6. All active listings (no filters)
+   */
   private async queryExistingListings(
     params: ExtractedParams,
     preferences: UserPreferencesData | null | undefined,
+  ): Promise<AgentListing[]> {
+    // Try strict first, then progressively relax
+    const result = await this.queryWithFilters(params, preferences, 'strict');
+    if (result.length > 0) return result;
+
+    // Relax: drop property type
+    const noType = await this.queryWithFilters(params, preferences, 'no_type');
+    if (noType.length > 0) return noType;
+
+    // Relax: drop neighborhood
+    const noNeighborhood = await this.queryWithFilters(params, preferences, 'no_neighborhood');
+    if (noNeighborhood.length > 0) return noNeighborhood;
+
+    // Relax: drop bedrooms
+    const noBedrooms = await this.queryWithFilters(params, preferences, 'no_bedrooms');
+    if (noBedrooms.length > 0) return noBedrooms;
+
+    // Relax: only max budget
+    const onlyMaxPrice = await this.queryWithFilters(params, preferences, 'only_max_price');
+    if (onlyMaxPrice.length > 0) return onlyMaxPrice;
+
+    // Final: all active listings
+    return this.queryWithFilters(params, preferences, 'none');
+  }
+
+  private async queryWithFilters(
+    params: ExtractedParams,
+    preferences: UserPreferencesData | null | undefined,
+    level: 'strict' | 'no_type' | 'no_neighborhood' | 'no_bedrooms' | 'only_max_price' | 'none',
   ): Promise<AgentListing[]> {
     const supabase = await createClient();
 
     let query = supabase.from('properties').select('*').eq('is_active', true);
 
-    // Filter by property type
-    const propertyTypes = params.propertyTypes?.length
-      ? params.propertyTypes
-      : preferences?.property_types?.length
-        ? preferences.property_types
-        : null;
-    if (propertyTypes && propertyTypes.length > 0) {
-      query = query.in('property_type', propertyTypes);
-    }
+    if (level === 'none') {
+      // No additional filters
+    } else if (level === 'only_max_price') {
+      const maxBudget = params.maxBudget ?? preferences?.max_budget;
+      if (maxBudget) query = query.lte('price', maxBudget);
+    } else {
+      // Filter by property type (skip for no_type and below)
+      if (level === 'strict') {
+        const propertyTypes = params.propertyTypes?.length
+          ? params.propertyTypes
+          : preferences?.property_types?.length
+            ? preferences.property_types
+            : null;
+        if (propertyTypes && propertyTypes.length > 0) {
+          query = query.in('property_type', propertyTypes);
+        }
+      }
 
-    // Filter by price
-    const maxBudget = params.maxBudget ?? preferences?.max_budget;
-    const minBudget = params.minBudget ?? preferences?.min_budget;
-    if (maxBudget) query = query.lte('price', maxBudget);
-    if (minBudget) query = query.gte('price', minBudget);
+      // Filter by price
+      const maxBudget = params.maxBudget ?? preferences?.max_budget;
+      const minBudget = params.minBudget ?? preferences?.min_budget;
+      if (maxBudget) query = query.lte('price', maxBudget);
+      if (minBudget) query = query.gte('price', minBudget);
 
-    // Filter by bedrooms
-    const minBed = params.minBedrooms ?? preferences?.min_bedrooms;
-    if (minBed) query = query.gte('bedrooms', minBed);
+      // Filter by bedrooms (skip for no_bedrooms and below)
+      if (level === 'strict' || level === 'no_type' || level === 'no_neighborhood') {
+        const minBed = params.minBedrooms ?? preferences?.min_bedrooms;
+        if (minBed) query = query.gte('bedrooms', minBed);
+      }
 
-    // Filter by neighborhood
-    const neighborhoods = params.neighborhoods?.length
-      ? params.neighborhoods
-      : preferences?.neighborhoods?.length
-        ? preferences.neighborhoods
-        : null;
-    if (neighborhoods && neighborhoods.length > 0) {
-      const neighborhoodFilter = neighborhoods.map(n => `location.ilike.%${n}%`).join(',');
-      query = query.or(neighborhoodFilter);
+      // Filter by neighborhood (skip for no_neighborhood and below)
+      if (level === 'strict' || level === 'no_type') {
+        const neighborhoods = params.neighborhoods?.length
+          ? params.neighborhoods
+          : preferences?.neighborhoods?.length
+            ? preferences.neighborhoods
+            : null;
+        if (neighborhoods && neighborhoods.length > 0) {
+          const neighborhoodFilter = neighborhoods.map(n => `location.ilike.%${n}%`).join(',');
+          query = query.or(neighborhoodFilter);
+        }
+      }
     }
 
     query = query.order('created_at', { ascending: false }).limit(20);
