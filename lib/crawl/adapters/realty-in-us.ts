@@ -100,7 +100,8 @@ interface RealtyApiResponse {
 class RealtyInUsAdapter implements ApiSourceAdapter {
   config: SourceAdapterConfig = {
     name: 'realty_in_us',
-    baseUrl: 'https://realty-in-us.p.rapidapi.com',
+    // The "Realtor" API on RapidAPI (replaces deprecated realty-in-us host)
+    baseUrl: 'https://realtor.p.rapidapi.com',
     reliability: 95,
     requestsPerMinute: 10,
     delayBetweenRequests: 6000,
@@ -168,7 +169,7 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
         const response = await client.fetchJson<RealtyApiResponse>(url, {
           headers: {
             'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
-            'X-RapidAPI-Host': 'realty-in-us.p.rapidapi.com',
+            'X-RapidAPI-Host': 'realtor.p.rapidapi.com',
           },
           adapterName: 'RealtyInUs',
           delayBetweenRequests: this.config.delayBetweenRequests,

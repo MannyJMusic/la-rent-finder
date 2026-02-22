@@ -93,8 +93,19 @@ fi
 
 pm2 save
 
-# --- 5. Cleanup old releases (keep last 5) ---
-echo "[5/5] Cleaning up old releases..."
+# --- 5. Install/update cron job for daily listing sync ---
+echo "[5/6] Setting up cron job..."
+if [ -n "${CRON_SECRET:-}" ]; then
+  CRON_CMD="0 14 * * * curl -sf -H 'Authorization: Bearer ${CRON_SECRET}' http://localhost:3001/api/cron/sync-listings >> /var/www/la-rent-finder/logs/cron-sync.log 2>&1"
+  # Remove old entry (if any) and add the current one — idempotent
+  (crontab -l 2>/dev/null | grep -v 'sync-listings' ; echo "${CRON_CMD}") | crontab -
+  echo "  Cron job installed: daily at 14:00 UTC (6 AM PST)"
+else
+  echo "  WARNING: CRON_SECRET not set — skipping cron job setup"
+fi
+
+# --- 6. Cleanup old releases (keep last 5) ---
+echo "[6/6] Cleaning up old releases..."
 cd "${RELEASES_DIR}"
 ls -dt */ 2>/dev/null | tail -n +6 | xargs -r rm -rf
 echo "  Kept last 5 releases"

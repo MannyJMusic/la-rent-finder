@@ -10,6 +10,17 @@
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
+    },
+    "RapidAPI Hub - Realty in US": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.rapidapi.com",
+        "--header",
+        "x-api-host: realty-in-us.p.rapidapi.com",
+        "--header",
+        "x-api-key: ${RAPIDAPI_KEY}"
+      ]
     }
   }
 }

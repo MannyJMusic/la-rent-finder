@@ -6,6 +6,11 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
+  // Skip auth processing for cron/webhook API routes (they use CRON_SECRET)
+  if (request.nextUrl.pathname.startsWith('/api/cron')) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
