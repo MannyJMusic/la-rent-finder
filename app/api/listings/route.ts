@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     if (has_photos === 'true') {
       query = query
         .not('photos', 'is', null)
-        .neq('photos', '{}');
+        .filter('photos', 'neq', '{}');
     }
 
     // Sorting
