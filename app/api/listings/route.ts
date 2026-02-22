@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
   const parking = searchParams.get('parking');
   const property_type = searchParams.get('property_type');
   const sort = searchParams.get('sort') || 'date';
+  const has_photos = searchParams.get('has_photos');
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
 
@@ -69,6 +70,13 @@ export async function GET(request: NextRequest) {
       } else if (sources.length > 1) {
         query = query.in('source_name', sources);
       }
+    }
+
+    // Filter to only listings with photos
+    if (has_photos === 'true') {
+      query = query
+        .not('photos', 'is', null)
+        .neq('photos', '{}');
     }
 
     // Sorting

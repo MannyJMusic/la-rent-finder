@@ -213,16 +213,35 @@ export default function MapboxMap({
       // Create marker element
       const el = document.createElement('div');
       el.className = 'listing-marker';
-      el.style.cssText = `
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        background-color: ${color};
-        border: 3px solid white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        cursor: pointer;
-        transition: transform 0.2s;
-      `;
+      const imageUrl = listing.imageUrl || listing.photos?.[0];
+
+      if (imageUrl) {
+        // Photo marker: circular thumbnail with score-colored border
+        el.style.cssText = `
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          background-image: url('${imageUrl}');
+          background-size: cover;
+          background-position: center;
+          border: 3px solid ${color};
+          box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+          cursor: pointer;
+          transition: transform 0.2s;
+        `;
+      } else {
+        // Fallback: solid color circle
+        el.style.cssText = `
+          width: 30px;
+          height: 30px;
+          border-radius: 50%;
+          background-color: ${color};
+          border: 3px solid white;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          cursor: pointer;
+          transition: transform 0.2s;
+        `;
+      }
 
       // Hover effect
       el.addEventListener('mouseenter', () => {
@@ -233,10 +252,10 @@ export default function MapboxMap({
       });
 
       // Create marker
-      const marker = new mapboxgl.Marker(el)
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([listing.longitude, listing.latitude])
         .setPopup(
-          new mapboxgl.Popup({ offset: 25 }).setHTML(`
+          new mapboxgl.Popup({ offset: 20 }).setHTML(`
             <div style="padding: 8px; min-width: 200px;">
               <h3 style="font-weight: bold; margin: 0 0 4px 0;">${listing.title}</h3>
               <p style="margin: 4px 0; font-size: 14px; color: #666;">${listing.address}</p>

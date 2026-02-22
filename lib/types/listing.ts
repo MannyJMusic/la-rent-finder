@@ -12,6 +12,7 @@ export interface Listing {
   scoring?: Record<string, unknown>;
   imageUrl?: string;
   image_url?: string;
+  photos?: string[];
   neighborhood?: string;
   description?: string;
   pet_friendly?: boolean;

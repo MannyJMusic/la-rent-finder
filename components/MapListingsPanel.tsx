@@ -75,6 +75,7 @@ export default function MapListingsPanel({
       }
 
       // Apply sort
+      params.set('has_photos', 'true');
       params.set('sort', sortOptionToApi[sortBy] || 'score');
 
       // Pagination
@@ -91,9 +92,10 @@ export default function MapListingsPanel({
       }
 
       const data = await res.json();
-      const listings: Listing[] = (data.listings || []).map((l: Listing) => ({
+      const listings: Listing[] = (data.listings || []).map((l: any) => ({
         ...l,
-        imageUrl: l.imageUrl || l.image_url,
+        imageUrl: l.photos?.[0] || l.imageUrl || l.image_url,
+        photos: l.photos,
       }));
 
       setApiListings(listings);

@@ -145,9 +145,10 @@ export default function ChatPanel({
               const listings: Listing[] = parsed.listings || [];
               if (listings.length > 0) {
                 // Normalize image_url to imageUrl
-                const normalizedListings = listings.map((l: Listing) => ({
+                const normalizedListings = listings.map((l: any) => ({
                   ...l,
-                  imageUrl: l.imageUrl || l.image_url,
+                  imageUrl: l.photos?.[0] || l.imageUrl || l.image_url,
+                  photos: l.photos,
                 }));
 
                 // Attach listings to the current message
