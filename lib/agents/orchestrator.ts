@@ -63,14 +63,14 @@ You must respond with a JSON object (no markdown, no explanation) with this exac
 }
 
 Intent definitions:
-- "search": User wants to find new rental listings (e.g. "find me a 2BR in Silver Lake")
-- "refine": User wants to narrow down or modify existing search results (e.g. "can you show cheaper options?")
+- "search": User wants to find new rental listings. This includes explicit requests (e.g. "find me a 2BR in Silver Lake") AND confirmations of search parameters from prior conversation (e.g. user says "yes" or "3500 and 2+ bedrooms" after being asked "would you like me to search with these criteria?"). If the conversation context shows the assistant offered to search and the user is confirming, classify as "search".
+- "refine": User wants to narrow down or modify existing search results that were already returned (e.g. "can you show cheaper options?")
 - "schedule": User wants to schedule a viewing or tour (e.g. "I'd like to see that apartment Saturday")
 - "estimate": User wants cost breakdown or budget analysis (e.g. "how much would it cost to move there?")
 - "save": User wants to save/bookmark a listing (e.g. "save that one")
 - "status": User asks about their saved listings, appointments, or search status
-- "general": General rental advice, LA neighborhood info, or greetings
-- "preferences": User is setting or updating their search preferences
+- "general": General rental advice, LA neighborhood info, or greetings. Do NOT use this for messages that confirm or trigger a property search.
+- "preferences": User is explicitly setting or updating their saved preferences for future searches, NOT confirming a one-time search
 
 Property type extraction:
 - "I want a house" -> propertyTypes: ["house"]
@@ -131,7 +131,12 @@ You can help with:
 
 Keep your responses concise, helpful, and focused on LA rentals. Use a warm, professional tone.
 When the user greets you, briefly introduce yourself and what you can help with.
-When the user asks about preferences, explain what preferences you can track (budget, bedrooms, neighborhoods, amenities, pets, parking).`;
+When the user asks about preferences, explain what preferences you can track (budget, bedrooms, neighborhoods, amenities, pets, parking).
+
+CRITICAL RULES:
+- NEVER output XML tags, pseudo-tool-calls, or structured markup like <search_properties> or similar. You are having a conversation, not calling tools.
+- NEVER fabricate search results or listings. If you don't have real data, say so.
+- If the user seems to want you to search for properties, tell them you'll start searching now and ask them to confirm their criteria in plain English.`;
 
 // ─── Orchestrator Agent Class ───────────────────────────────────
 
