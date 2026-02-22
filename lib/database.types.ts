@@ -911,4 +911,4 @@ export type CrawlRunUpdate = Updates<'crawl_runs'>
 export type CrawlSourceUpdate = Updates<'crawl_sources'>
 
 // Property type enum
-export type PropertyType = 'apartment' | 'house' | 'condo' | 'townhouse' | 'room'
+export type PropertyType = 'apartment' | 'house' | 'condo' | 'townhouse' | 'room' | 'duplex'

@@ -200,7 +200,13 @@ export default function ChatPanel({
               const toAgent = parsed.toAgent || '';
               if (toAgent) {
                 // Map agent names to user-friendly statuses
+                // Agents emit PascalCase names (e.g. "MarketResearcher")
                 const agentStatusMap: Record<string, AgentStatus> = {
+                  'MarketResearcher': 'searching',
+                  'CostEstimator': 'estimating',
+                  'AppointmentScheduler': 'scheduling',
+                  'Orchestrator': 'thinking',
+                  // Legacy kebab-case mappings
                   'market-researcher': 'searching',
                   'cost-estimator': 'estimating',
                   'scheduler': 'scheduling',

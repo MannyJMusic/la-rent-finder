@@ -34,7 +34,7 @@ import type {
 
 const ORCHESTRATOR_SYSTEM_PROMPT = `You are the orchestrator for an LA rental apartment finder. Your job is to:
 1. Understand the user's intent
-2. Extract relevant parameters from their message
+2. Extract relevant parameters from their message AND from conversation history
 3. Decide which specialist agent should handle the request
 
 You must respond with a JSON object (no markdown, no explanation) with this exact shape:
@@ -63,23 +63,30 @@ You must respond with a JSON object (no markdown, no explanation) with this exac
 }
 
 Intent definitions:
-- "search": User wants to find new rental listings. This includes explicit requests (e.g. "find me a 2BR in Silver Lake") AND confirmations of search parameters from prior conversation (e.g. user says "yes" or "3500 and 2+ bedrooms" after being asked "would you like me to search with these criteria?"). If the conversation context shows the assistant offered to search and the user is confirming, classify as "search".
+- "search": User wants to find new rental listings. This includes:
+  * Explicit search requests: "find me a 2BR in Silver Lake"
+  * Confirmations of search criteria: "yes", "sounds good", "let's do it", "go ahead"
+  * Expanding or modifying search criteria: "I'll also consider townhouses", "add Venice too"
+  * Mentioning property types, neighborhoods, budgets, or bedroom counts in a search conversation
+  * ANY message that adds, confirms, or adjusts search parameters when the conversation has been about finding properties
+  IMPORTANT: When in doubt between "search" and "general"/"preferences", choose "search" if the conversation has been discussing rental criteria.
 - "refine": User wants to narrow down or modify existing search results that were already returned (e.g. "can you show cheaper options?")
 - "schedule": User wants to schedule a viewing or tour (e.g. "I'd like to see that apartment Saturday")
 - "estimate": User wants cost breakdown or budget analysis (e.g. "how much would it cost to move there?")
 - "save": User wants to save/bookmark a listing (e.g. "save that one")
 - "status": User asks about their saved listings, appointments, or search status
-- "general": General rental advice, LA neighborhood info, or greetings. Do NOT use this for messages that confirm or trigger a property search.
-- "preferences": User is explicitly setting or updating their saved preferences for future searches, NOT confirming a one-time search
+- "general": ONLY for greetings, general rental advice, or LA neighborhood info that is clearly NOT about triggering a property search. Do NOT use this for messages that confirm, expand, or trigger a property search.
+- "preferences": User is explicitly asking to save or update their stored preferences for future searches, NOT confirming a one-time search. Must explicitly mention "preferences", "save my settings", or similar.
 
 Property type extraction:
 - "I want a house" -> propertyTypes: ["house"]
 - "looking for a condo or townhouse" -> propertyTypes: ["condo", "townhouse"]
 - "apartment" -> propertyTypes: ["apartment"]
-- Valid types: "apartment", "house", "condo", "townhouse", "room"
+- "I'll consider townhouses and duplexes" -> propertyTypes: ["townhouse", "duplex"]
+- Valid types: "apartment", "house", "condo", "townhouse", "room", "duplex"
 - If user doesn't specify a type, use their stored preferences as default
 
-Extract as many parameters as you can from the message and conversation history. Use the user's stored preferences as fallback values when relevant.`;
+CRITICAL: Always extract ALL available parameters from BOTH the current message AND the conversation history. If the conversation discussed budget, neighborhoods, bedrooms, pet-friendliness, or parking earlier, include those in params even if the current message doesn't repeat them. Use the user's stored preferences as additional fallback values.`;
 
 // ─── Intent to Agent Name Mapping ───────────────────────────────
 
@@ -187,9 +194,20 @@ export class OrchestratorAgent extends BaseAgent {
 
     // Safety net: if classified as general/preferences but extractedParams
     // contain real search criteria, re-route to MarketResearcher.
-    if (!targetAgentName && this.hasSearchParams(extractedParams, request.preferences)) {
+    if (!targetAgentName && this.hasSearchParams(extractedParams, request.preferences, request.message)) {
       console.log(
         `[Orchestrator] Intent "${intent}" has search params — upgrading to "search"`,
+      );
+      intent = 'search';
+      subContext.intent = intent;
+      targetAgentName = 'MarketResearcher';
+    }
+
+    // Second safety net: if conversation context is search-related and
+    // the user is responding with property-related terms, upgrade to search
+    if (!targetAgentName && this.isSearchConversation(request)) {
+      console.log(
+        `[Orchestrator] Intent "${intent}" in search conversation — upgrading to "search"`,
       );
       intent = 'search';
       subContext.intent = intent;
@@ -336,6 +354,7 @@ export class OrchestratorAgent extends BaseAgent {
   private hasSearchParams(
     params: ExtractedParams,
     preferences: OrchestratorRequest['preferences'],
+    userMessage?: string,
   ): boolean {
     // Count how many search-relevant fields are populated
     let signals = 0;
@@ -359,15 +378,107 @@ export class OrchestratorAgent extends BaseAgent {
       if (hasPrefs) return true;
     }
 
-    // Check the message text as a last resort
-    const msg = params.searchQuery?.toLowerCase() ?? '';
+    // Check both the searchQuery param and the raw user message
+    const textsToCheck = [
+      params.searchQuery?.toLowerCase() ?? '',
+      userMessage?.toLowerCase() ?? '',
+    ];
+
     const searchKeywords = [
       'search', 'find', 'look for', 'show me', 'get me',
       'available', 'listings', 'rentals', 'properties',
     ];
-    if (searchKeywords.some((kw) => msg.includes(kw))) return true;
+
+    for (const text of textsToCheck) {
+      if (text && searchKeywords.some((kw) => text.includes(kw))) return true;
+    }
+
+    // Check raw user message for property-related terms that imply search intent
+    const msg = userMessage?.toLowerCase() ?? '';
+    const propertyTerms = [
+      'apartment', 'house', 'condo', 'townhouse', 'duplex', 'studio',
+      'bedroom', 'br', 'bath', 'pet friendly', 'parking',
+      'rent', 'lease', 'move in', 'move-in',
+    ];
+    const propertyTermMatches = propertyTerms.filter((term) => msg.includes(term));
+
+    // If the message mentions property terms AND user has preferences, likely a search
+    if (propertyTermMatches.length > 0 && preferences) {
+      const hasPrefs =
+        !!preferences.max_budget ||
+        !!preferences.min_bedrooms ||
+        (preferences.neighborhoods && preferences.neighborhoods.length > 0);
+      if (hasPrefs) return true;
+    }
 
     return false;
+  }
+
+  // ─── Conversation Context Detection ────────────────────────
+
+  /**
+   * Detects whether the recent conversation has been about property searching.
+   * If the assistant recently discussed search criteria, neighborhoods, listings,
+   * or property types, and the user is now responding with related terms or
+   * confirmations, we should upgrade the intent to "search".
+   */
+  private isSearchConversation(request: OrchestratorRequest): boolean {
+    const history = request.chatHistory;
+    if (history.length === 0) return false;
+
+    // Check the last 4 messages for search-related assistant responses
+    const recentMessages = history.slice(-4);
+    const assistantMessages = recentMessages
+      .filter((m) => m.role === 'assistant')
+      .map((m) => m.content.toLowerCase());
+
+    if (assistantMessages.length === 0) return false;
+
+    // Search context indicators in assistant messages
+    const searchContextPatterns = [
+      'searching for', 'search for', 'looking for',
+      'bedroom', 'bedrooms', 'br',
+      'budget', 'price range', '/month', '/mo',
+      'neighborhood', 'silver lake', 'echo park', 'hollywood',
+      'east hollywood', 'koreatown', 'downtown',
+      'property type', 'apartment', 'house', 'townhouse', 'condo', 'duplex',
+      'pet friendly', 'pet-friendly', 'parking',
+      'criteria', 'preferences',
+      'would you like me to search', 'shall i search',
+      'start searching', 'find properties', 'find listings',
+      'expand', 'broaden', 'also consider',
+    ];
+
+    const hasSearchContext = assistantMessages.some((msg) =>
+      searchContextPatterns.some((pattern) => msg.includes(pattern)),
+    );
+
+    if (!hasSearchContext) return false;
+
+    // Now check if the user's message is a confirmation or property-related response
+    const userMsg = request.message.toLowerCase();
+
+    // Confirmation patterns
+    const confirmationPatterns = [
+      'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'go ahead',
+      'sounds good', 'let\'s do it', 'do it', 'please', 'that works',
+      'i\'ll consider', 'i will consider', 'i\'d also', 'i would also',
+      'also include', 'also consider', 'add',
+      'expand', 'broaden', 'include',
+    ];
+
+    // Property-related terms
+    const propertyTerms = [
+      'apartment', 'house', 'condo', 'townhouse', 'duplex', 'studio', 'room',
+      'bedroom', 'br', 'bath',
+      'pet', 'parking', 'furnished',
+      'budget', '$',
+    ];
+
+    const isConfirmation = confirmationPatterns.some((p) => userMsg.includes(p));
+    const hasPropertyTerms = propertyTerms.some((t) => userMsg.includes(t));
+
+    return isConfirmation || hasPropertyTerms;
   }
 
   // ─── Direct Response Handling ─────────────────────────────────
