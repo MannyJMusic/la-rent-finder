@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface FilterValue {
+  propertyType?: string[];
   neighborhood?: string[];
   priceRange?: { min: number; max: number };
   bedrooms?: number;
@@ -21,6 +22,10 @@ export default function FilterChips({ filters, onRemove, onClearAll }: FilterChi
   const chips: { key: keyof FilterValue; label: string }[] = [];
 
   // Build chips from active filters
+  if (filters.propertyType && filters.propertyType.length > 0) {
+    const labels = filters.propertyType.map(t => t.charAt(0).toUpperCase() + t.slice(1));
+    chips.push({ key: 'propertyType', label: labels.join(', ') });
+  }
   if (filters.neighborhood && filters.neighborhood.length > 0) {
     chips.push({ key: 'neighborhood', label: filters.neighborhood.join(', ') });
   }

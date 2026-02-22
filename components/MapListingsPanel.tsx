@@ -70,6 +70,9 @@ export default function MapListingsPanel({
       if (filters.parking !== undefined) {
         params.set('parking', filters.parking.toString());
       }
+      if (filters.propertyType && filters.propertyType.length > 0) {
+        params.set('property_type', filters.propertyType.join(','));
+      }
 
       // Apply sort
       params.set('sort', sortOptionToApi[sortBy] || 'score');
@@ -199,6 +202,7 @@ export default function MapListingsPanel({
       neighborhood: ['Santa Monica', 'Venice'],
       priceRange: { min: 2000, max: 4000 },
       bedrooms: 2,
+      propertyType: ['house'],
     });
   };
 

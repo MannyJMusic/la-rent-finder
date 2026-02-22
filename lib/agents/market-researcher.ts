@@ -29,7 +29,7 @@ import type {
   UserPreferencesData,
 } from './types';
 import { createClient } from '@/lib/supabase/server';
-import type { Json } from '@/lib/database.types';
+import type { Json, PropertyType } from '@/lib/database.types';
 
 // ─── Configuration ──────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ const MARKET_RESEARCHER_CONFIG: AgentConfig = {
 };
 
 function MARKET_RESEARCHER_SYSTEM_PROMPT(): string {
-  return `You are a real estate research agent specializing in Los Angeles rental apartments. Your job is to search the web for available rental listings that match the user's criteria.
+  return `You are a real estate research agent specializing in Los Angeles rental properties. Your job is to search the web for available rental listings that match the user's criteria.
 
 When searching, focus on:
 - Major LA rental listing sites (apartments.com, zillow.com, trulia.com, hotpads.com, westsiderentals.com, craigslist.org)
@@ -69,7 +69,8 @@ After finding listings, you must return a JSON array of listings with this exact
     "longitude": number | null,
     "listing_url": "string" | null,
     "description": "string - brief description",
-    "source": "string - website name"
+    "source": "string - website name",
+    "property_type": "apartment" | "house" | "condo" | "townhouse" | "room"
   }
 ]
 
@@ -151,7 +152,20 @@ export class MarketResearcherAgent extends BaseAgent {
   private buildSearchQuery(context: SubAgentContext): string {
     const params = context.extractedParams;
     const prefs = context.preferences;
-    const parts: string[] = ['apartments for rent in'];
+
+    // Determine property types
+    const propertyTypes =
+      params.propertyTypes?.length
+        ? params.propertyTypes
+        : prefs?.property_types?.length
+          ? prefs.property_types
+          : ['house'];
+
+    const typeLabel = propertyTypes.length === 1
+      ? `${propertyTypes[0]}s`
+      : propertyTypes.map(t => `${t}s`).join(' or ');
+
+    const parts: string[] = [`${typeLabel} for rent in`];
 
     // Neighborhoods
     const neighborhoods =
@@ -278,6 +292,7 @@ export class MarketResearcherAgent extends BaseAgent {
       listing_url: raw.listing_url != null ? String(raw.listing_url) : null,
       description: raw.description != null ? String(raw.description) : null,
       source: raw.source != null ? String(raw.source) : 'web_search',
+      property_type: raw.property_type != null ? String(raw.property_type) : undefined,
     };
   }
 
@@ -313,17 +328,19 @@ export class MarketResearcherAgent extends BaseAgent {
       quality_score: this.scoreListingQuality(listing),
       freshness_score: this.scoreFreshness(listing),
       source_reliability_score: this.scoreSourceReliability(listing),
+      property_type_score: this.scorePropertyTypeMatch(listing, prefs, params),
     };
 
     // Weighted average (prices matter most in LA)
     const weights = {
-      price_score: 0.30,
-      location_score: 0.25,
-      size_score: 0.15,
-      amenity_score: 0.10,
-      quality_score: 0.08,
-      freshness_score: 0.07,
-      source_reliability_score: 0.05,
+      price_score: 0.25,
+      location_score: 0.20,
+      size_score: 0.12,
+      amenity_score: 0.08,
+      quality_score: 0.07,
+      freshness_score: 0.06,
+      source_reliability_score: 0.04,
+      property_type_score: 0.18,
     };
 
     const overall_score = Math.round(
@@ -524,6 +541,23 @@ export class MarketResearcherAgent extends BaseAgent {
     return 65;
   }
 
+  private scorePropertyTypeMatch(
+    listing: AgentListing,
+    prefs: UserPreferencesData | null | undefined,
+    params: ExtractedParams,
+  ): number {
+    const wantedTypes = [
+      ...(params.propertyTypes || []),
+      ...(prefs?.property_types || []),
+    ].map(t => t.toLowerCase());
+
+    if (wantedTypes.length === 0) return 70;
+
+    const listingType = (listing.property_type || 'apartment').toLowerCase();
+    if (wantedTypes.includes(listingType)) return 95;
+    return 30;
+  }
+
   // ─── Persistence ────────────────────────────────────────────────
 
   /**
@@ -556,6 +590,7 @@ export class MarketResearcherAgent extends BaseAgent {
               longitude: listing.longitude,
               listing_url: listing.listing_url ?? null,
               description: listing.description ?? null,
+              property_type: (listing.property_type ?? 'apartment') as PropertyType,
             },
             { onConflict: 'title,address' }
           )
@@ -667,10 +702,19 @@ export class MarketResearcherAgent extends BaseAgent {
           ? prefs.neighborhoods
           : ['Silver Lake', 'Echo Park', 'Los Feliz', 'Highland Park'];
 
+    const propertyTypes =
+      params.propertyTypes?.length
+        ? params.propertyTypes
+        : prefs?.property_types?.length
+          ? prefs.property_types
+          : ['house'];
+    const primaryType = propertyTypes[0] || 'house';
+    const typeLabel = primaryType.charAt(0).toUpperCase() + primaryType.slice(1);
+
     const mockListings: AgentListing[] = [
       {
         id: `mock-${Date.now()}-1`,
-        title: `Modern ${minBedrooms}BR Apartment in ${neighborhoods[0]}`,
+        title: `Modern ${minBedrooms}BR ${typeLabel} in ${neighborhoods[0]}`,
         address: `1234 Sunset Blvd, ${neighborhoods[0]}, CA 90026`,
         location: neighborhoods[0],
         price: Math.round(maxBudget * 0.85),
@@ -687,10 +731,11 @@ export class MarketResearcherAgent extends BaseAgent {
         listing_url: null,
         description: `Beautiful updated ${minBedrooms}-bedroom apartment with modern finishes. In-unit washer/dryer, hardwood floors throughout, and abundant natural light.`,
         source: 'apartments.com',
+        property_type: primaryType,
       },
       {
         id: `mock-${Date.now()}-2`,
-        title: `Spacious ${minBedrooms + 1}BR with Views in ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}`,
+        title: `Spacious ${minBedrooms + 1}BR ${typeLabel} with Views in ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}`,
         address: `5678 Echo Park Ave, ${neighborhoods[Math.min(1, neighborhoods.length - 1)]}, CA 90026`,
         location: neighborhoods[Math.min(1, neighborhoods.length - 1)],
         price: Math.round(maxBudget * 0.95),
@@ -707,10 +752,11 @@ export class MarketResearcherAgent extends BaseAgent {
         listing_url: null,
         description: `Stunning ${minBedrooms + 1}-bedroom with panoramic city views from private rooftop deck. Recently renovated kitchen and bathrooms.`,
         source: 'zillow',
+        property_type: primaryType,
       },
       {
         id: `mock-${Date.now()}-3`,
-        title: `Cozy ${minBedrooms}BR Near Metro in ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}`,
+        title: `Cozy ${minBedrooms}BR ${typeLabel} Near Metro in ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}`,
         address: `910 Vermont Ave, ${neighborhoods[Math.min(2, neighborhoods.length - 1)]}, CA 90029`,
         location: neighborhoods[Math.min(2, neighborhoods.length - 1)],
         price: Math.round(maxBudget * 0.7),
@@ -727,10 +773,11 @@ export class MarketResearcherAgent extends BaseAgent {
         listing_url: null,
         description: `Well-maintained ${minBedrooms}-bedroom just steps from the Metro. Great for commuters. Quiet, tree-lined street.`,
         source: 'trulia',
+        property_type: primaryType,
       },
       {
         id: `mock-${Date.now()}-4`,
-        title: `Luxury ${minBedrooms + 1}BR Loft in ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}`,
+        title: `Luxury ${minBedrooms + 1}BR ${typeLabel} in ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}`,
         address: `2020 York Blvd, ${neighborhoods[Math.min(3, neighborhoods.length - 1)]}, CA 90042`,
         location: neighborhoods[Math.min(3, neighborhoods.length - 1)],
         price: Math.round(maxBudget * 1.05),
@@ -747,10 +794,11 @@ export class MarketResearcherAgent extends BaseAgent {
         listing_url: null,
         description: `Stunning loft-style ${minBedrooms + 1}-bedroom in a brand new building. High ceilings, floor-to-ceiling windows, and top-of-the-line appliances.`,
         source: 'westsiderentals',
+        property_type: primaryType,
       },
       {
         id: `mock-${Date.now()}-5`,
-        title: `Charming ${minBedrooms}BR Bungalow in ${neighborhoods[0]}`,
+        title: `Charming ${minBedrooms}BR ${typeLabel} in ${neighborhoods[0]}`,
         address: `3456 Hyperion Ave, ${neighborhoods[0]}, CA 90027`,
         location: neighborhoods[0],
         price: Math.round(maxBudget * 0.9),
@@ -767,6 +815,7 @@ export class MarketResearcherAgent extends BaseAgent {
         listing_url: null,
         description: `Classic LA bungalow with tons of character. Private fenced patio, original hardwood floors, and a detached garage.`,
         source: 'hotpads',
+        property_type: primaryType,
       },
     ];
 

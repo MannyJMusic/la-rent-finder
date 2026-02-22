@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Protected routes that require authentication
-  const protectedRoutes = ['/dashboard', '/favorites', '/appointments', '/messages', '/chat'];
+  const protectedRoutes = ['/dashboard', '/favorites', '/appointments', '/messages', '/chat', '/onboarding'];
   const publicRoutes = ['/chat-demo', '/map-demo']; // Demo/test routes that bypass auth
   const isPublicRoute = publicRoutes.some(route =>
     request.nextUrl.pathname.startsWith(route)

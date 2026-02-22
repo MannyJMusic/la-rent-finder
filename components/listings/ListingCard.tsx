@@ -43,6 +43,15 @@ export default function ListingCard({ listing, onClick, isSelected }: ListingCar
           </div>
         )}
 
+        {/* Property Type Badge */}
+        {listing.property_type && listing.property_type !== 'apartment' && (
+          <div className="absolute top-2 left-2">
+            <div className="px-2 py-0.5 rounded-full bg-black/60 text-xs font-medium text-white backdrop-blur-sm">
+              {listing.property_type.charAt(0).toUpperCase() + listing.property_type.slice(1)}
+            </div>
+          </div>
+        )}
+
         {/* Score Badge */}
         {listing.score !== undefined && (
           <div className="absolute top-2 right-2">

@@ -56,7 +56,8 @@ You must respond with a JSON object (no markdown, no explanation) with this exac
     "listingIds": ["string"] | undefined,
     "requestedDate": "YYYY-MM-DD" | undefined,
     "requestedTime": "HH:MM" | undefined,
-    "searchQuery": "string" | undefined
+    "searchQuery": "string" | undefined,
+    "propertyTypes": ["string"] | undefined
   },
   "reasoning": "brief explanation of why you chose this intent"
 }
@@ -70,6 +71,13 @@ Intent definitions:
 - "status": User asks about their saved listings, appointments, or search status
 - "general": General rental advice, LA neighborhood info, or greetings
 - "preferences": User is setting or updating their search preferences
+
+Property type extraction:
+- "I want a house" -> propertyTypes: ["house"]
+- "looking for a condo or townhouse" -> propertyTypes: ["condo", "townhouse"]
+- "apartment" -> propertyTypes: ["apartment"]
+- Valid types: "apartment", "house", "condo", "townhouse", "room"
+- If user doesn't specify a type, use their stored preferences as default
 
 Extract as many parameters as you can from the message and conversation history. Use the user's stored preferences as fallback values when relevant.`;
 

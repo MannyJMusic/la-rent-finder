@@ -13,5 +13,16 @@ export default async function DashboardPage() {
     redirect('/auth/login');
   }
 
+  // Redirect new users who haven't completed onboarding
+  const { data: prefs } = await supabase
+    .from('user_preferences')
+    .select('id')
+    .eq('user_id', user.id)
+    .single();
+
+  if (!prefs) {
+    redirect('/onboarding');
+  }
+
   return <DashboardLayout user={user} />;
 }

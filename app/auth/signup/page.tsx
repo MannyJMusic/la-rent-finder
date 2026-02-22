@@ -64,7 +64,7 @@ export default function SignUpPage() {
         } else {
           // Email confirmation is disabled — redirect to dashboard
           setTimeout(() => {
-            router.push('/dashboard');
+            router.push('/onboarding');
             router.refresh();
           }, 2000);
         }
@@ -92,7 +92,7 @@ export default function SignUpPage() {
                 </>
               ) : (
                 <h3 className="text-sm font-medium text-green-800">
-                  Account created successfully! Redirecting to dashboard...
+                  Account created successfully! Redirecting...
                 </h3>
               )}
             </div>

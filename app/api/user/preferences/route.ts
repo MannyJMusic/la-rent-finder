@@ -43,6 +43,8 @@ interface UpdatePreferencesBody {
   commute_lat?: number | null;
   commute_lon?: number | null;
   move_in_date?: string | null;
+  property_types?: string[];
+  onboarding_completed?: boolean;
 }
 
 export async function PUT(request: NextRequest) {

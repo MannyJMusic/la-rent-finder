@@ -179,6 +179,8 @@ export interface ExtractedParams {
   requestedTime?: string;
   /** Free-form search query */
   searchQuery?: string;
+  /** Property types requested (house, apartment, condo, townhouse, room) */
+  propertyTypes?: string[];
 }
 
 // ─── Agent Configuration ────────────────────────────────────────
@@ -221,6 +223,7 @@ export interface AgentListing {
   listing_url?: string | null;
   description?: string | null;
   source?: string;
+  property_type?: string;
 }
 
 export interface ScoringResult {
@@ -312,6 +315,7 @@ export interface UserPreferencesData {
   furnished_preference: string | null;
   lease_duration_months: number | null;
   move_in_date: string | null;
+  property_types: string[];
 }
 
 // ─── Legacy Compatibility ───────────────────────────────────────

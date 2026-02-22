@@ -177,6 +177,7 @@ async function loadUserPreferences(
       furnished_preference: data.furnished_preference ?? null,
       lease_duration_months: data.lease_duration_months ?? null,
       move_in_date: data.move_in_date ?? null,
+      property_types: data.property_types ?? [],
     };
   } catch {
     return null;

@@ -21,6 +21,11 @@ import {
   Moon,
   Sofa,
   Navigation,
+  Home,
+  Building2,
+  Building,
+  Rows3,
+  DoorOpen,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -28,45 +33,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import DashboardHeader from '@/components/DashboardHeader';
+import { LA_NEIGHBORHOODS, PROPERTY_TYPE_OPTIONS } from '@/lib/constants';
 
-// LA neighborhoods for multi-select
-const LA_NEIGHBORHOODS = [
-  'Hollywood',
-  'Silver Lake',
-  'Echo Park',
-  'Los Feliz',
-  'Downtown LA',
-  'Koreatown',
-  'West Hollywood',
-  'Santa Monica',
-  'Venice',
-  'Mar Vista',
-  'Culver City',
-  'Westwood',
-  'Brentwood',
-  'Beverly Hills',
-  'Burbank',
-  'Glendale',
-  'Pasadena',
-  'Highland Park',
-  'Eagle Rock',
-  'Atwater Village',
-  'Larchmont',
-  'Mid-Wilshire',
-  'Fairfax',
-  'Hancock Park',
-  'Sherman Oaks',
-  'Studio City',
-  'North Hollywood',
-  'Encino',
-  'Woodland Hills',
-  'Long Beach',
-  'Redondo Beach',
-  'Hermosa Beach',
-  'Manhattan Beach',
-  'Playa Vista',
-  'Marina del Rey',
-];
+const SETTINGS_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  Home, Building2, Building, Rows3, DoorOpen,
+};
 
 const AMENITIES = [
   { id: 'parking', label: 'Parking', icon: '🅿️' },
@@ -114,6 +85,7 @@ interface UserPreferences {
   move_in_date?: string | null;
   furnished_preference?: string | null;
   commute_address?: string | null;
+  property_types?: string[];
 }
 
 export default function SettingsClient() {
@@ -137,6 +109,7 @@ export default function SettingsClient() {
   const [leaseDuration, setLeaseDuration] = useState<string>('12');
   const [furnishedPreference, setFurnishedPreference] = useState<string>('any');
   const [commuteAddress, setCommuteAddress] = useState<string>('');
+  const [selectedPropertyTypes, setSelectedPropertyTypes] = useState<string[]>([]);
   const { theme, toggleTheme } = useTheme();
 
   // Fetch current preferences
@@ -163,6 +136,7 @@ export default function SettingsClient() {
 
         setFurnishedPreference(prefs.furnished_preference ?? 'any');
         setCommuteAddress(prefs.commute_address ?? '');
+        setSelectedPropertyTypes((prefs as any).property_types ?? []);
 
         // Derive pet type from amenities and pet_friendly
         if (prefs.pet_friendly === true) {
@@ -213,6 +187,7 @@ export default function SettingsClient() {
         move_in_date: moveInDate || null,
         furnished_preference: furnishedPreference !== 'any' ? furnishedPreference : null,
         commute_address: commuteAddress || null,
+        property_types: selectedPropertyTypes,
       };
 
       const res = await fetch('/api/user/preferences', {
@@ -250,6 +225,15 @@ export default function SettingsClient() {
       prev.includes(amenityId)
         ? prev.filter((a) => a !== amenityId)
         : [...prev, amenityId]
+    );
+  };
+
+  // Toggle property type selection
+  const togglePropertyType = (typeId: string) => {
+    setSelectedPropertyTypes((prev) =>
+      prev.includes(typeId)
+        ? prev.filter((t) => t !== typeId)
+        : [...prev, typeId]
     );
   };
 
@@ -316,6 +300,39 @@ export default function SettingsClient() {
             </div>
           ) : (
             <div className="space-y-6">
+              {/* Property Types */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base font-medium flex items-center gap-2">
+                    <Home className="h-4 w-4 text-primary" />
+                    Property Types
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {PROPERTY_TYPE_OPTIONS.map((type) => {
+                      const isSelected = selectedPropertyTypes.includes(type.id);
+                      const IconComponent = SETTINGS_ICON_MAP[type.icon];
+                      return (
+                        <button
+                          key={type.id}
+                          type="button"
+                          className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-all ${
+                            isSelected
+                              ? 'border-primary bg-primary/10 text-foreground font-medium'
+                              : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:bg-muted'
+                          }`}
+                          onClick={() => togglePropertyType(type.id)}
+                        >
+                          {IconComponent && <IconComponent className="h-4 w-4" />}
+                          <span className="truncate">{type.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Budget Range */}
               <Card>
                 <CardHeader className="pb-3">

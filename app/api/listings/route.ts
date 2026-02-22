@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import type { PropertyType } from '@/lib/database.types';
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
   const neighborhood = searchParams.get('neighborhood');
   const pet_friendly = searchParams.get('pet_friendly');
   const parking = searchParams.get('parking');
+  const property_type = searchParams.get('property_type');
   const sort = searchParams.get('sort') || 'date';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
@@ -43,6 +45,14 @@ export async function GET(request: NextRequest) {
     }
     if (parking === 'true') {
       query = query.eq('parking_available', true);
+    }
+    if (property_type) {
+      const types = property_type.split(',').map(t => t.trim()).filter(Boolean) as PropertyType[];
+      if (types.length === 1) {
+        query = query.eq('property_type', types[0]);
+      } else if (types.length > 1) {
+        query = query.in('property_type', types);
+      }
     }
 
     // Sorting

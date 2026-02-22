@@ -16,6 +16,7 @@ export interface Listing {
   description?: string;
   pet_friendly?: boolean;
   parking?: boolean;
+  property_type?: 'apartment' | 'house' | 'condo' | 'townhouse' | 'room';
   available_date?: string;
   created_at?: string;
 }

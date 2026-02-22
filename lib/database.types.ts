@@ -76,6 +76,8 @@ export interface Database {
           commute_lat: number | null
           commute_lon: number | null
           move_in_date: string | null
+          property_types: string[]
+          onboarding_completed: boolean
           created_at: string
           updated_at: string
         }
@@ -99,6 +101,8 @@ export interface Database {
           commute_lat?: number | null
           commute_lon?: number | null
           move_in_date?: string | null
+          property_types?: string[]
+          onboarding_completed?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -122,6 +126,8 @@ export interface Database {
           commute_lat?: number | null
           commute_lon?: number | null
           move_in_date?: string | null
+          property_types?: string[]
+          onboarding_completed?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -160,6 +166,7 @@ export interface Database {
           contact_email: string | null
           contact_phone: string | null
           landlord_name: string | null
+          property_type: PropertyType
           created_at: string
           updated_at: string
         }
@@ -187,6 +194,7 @@ export interface Database {
           contact_email?: string | null
           contact_phone?: string | null
           landlord_name?: string | null
+          property_type?: PropertyType
           created_at?: string
           updated_at?: string
         }
@@ -214,6 +222,7 @@ export interface Database {
           contact_email?: string | null
           contact_phone?: string | null
           landlord_name?: string | null
+          property_type?: PropertyType
           created_at?: string
           updated_at?: string
         }
@@ -789,3 +798,6 @@ export type ListingScoreUpdate = Updates<'listing_scores'>
 export type CostEstimateUpdate = Updates<'cost_estimates'>
 export type CommunicationUpdate = Updates<'communications'>
 export type ChatMessageUpdate = Updates<'chat_messages'>
+
+// Property type enum
+export type PropertyType = 'apartment' | 'house' | 'condo' | 'townhouse' | 'room'
