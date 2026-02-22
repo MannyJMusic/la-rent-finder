@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
 
   try {
-    let query = supabase.from('apartments').select('*', { count: 'exact' });
+    let query = supabase.from('properties').select('*', { count: 'exact' });
 
     if (price_min) {
       query = query.gte('price', parseFloat(price_min));

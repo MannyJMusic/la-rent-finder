@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch the apartment to get price and features
     const { data: apartment, error: aptError } = await supabase
-      .from('apartments')
+      .from('properties')
       .select('*')
       .eq('id', apartment_id)
       .single();

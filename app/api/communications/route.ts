@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   try {
     let query = supabase
       .from('communications')
-      .select('*, apartments(*)', { count: 'exact' })
+      .select('*, properties(*)', { count: 'exact' })
       .eq('user_id', user.id);
 
     if (apartment_id) {

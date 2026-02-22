@@ -141,7 +141,7 @@ export interface Database {
           }
         ]
       }
-      apartments: {
+      properties: {
         Row: {
           id: string
           title: string
@@ -259,7 +259,7 @@ export interface Database {
             foreignKeyName: 'favorites_apartment_id_fkey'
             columns: ['apartment_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           }
         ]
@@ -310,7 +310,7 @@ export interface Database {
             foreignKeyName: 'appointments_apartment_id_fkey'
             columns: ['apartment_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           }
         ]
@@ -365,7 +365,7 @@ export interface Database {
             foreignKeyName: 'messages_apartment_id_fkey'
             columns: ['apartment_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           }
         ]
@@ -506,7 +506,7 @@ export interface Database {
             foreignKeyName: 'listing_scores_listing_id_fkey'
             columns: ['listing_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           },
           {
@@ -616,7 +616,7 @@ export interface Database {
             foreignKeyName: 'cost_estimates_listing_id_fkey'
             columns: ['listing_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           }
         ]
@@ -676,7 +676,7 @@ export interface Database {
             foreignKeyName: 'communications_apartment_id_fkey'
             columns: ['apartment_id']
             isOneToOne: false
-            referencedRelation: 'apartments'
+            referencedRelation: 'properties'
             referencedColumns: ['id']
           }
         ]
@@ -731,7 +731,7 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      search_apartments_nearby: {
+      search_properties_nearby: {
         Args: {
           target_lat: number
           target_lon: number
@@ -760,7 +760,7 @@ export type Updates<T extends keyof Database['public']['Tables']> = Database['pu
 // Specific type exports for convenience
 export type User = Tables<'users'>
 export type UserPreferences = Tables<'user_preferences'>
-export type Apartment = Tables<'apartments'>
+export type Property = Tables<'properties'>
 export type Favorite = Tables<'favorites'>
 export type Appointment = Tables<'appointments'>
 export type Message = Tables<'messages'>
@@ -774,7 +774,7 @@ export type ChatMessage = Tables<'chat_messages'>
 // Insert type exports
 export type UserInsert = Inserts<'users'>
 export type UserPreferencesInsert = Inserts<'user_preferences'>
-export type ApartmentInsert = Inserts<'apartments'>
+export type PropertyInsert = Inserts<'properties'>
 export type FavoriteInsert = Inserts<'favorites'>
 export type AppointmentInsert = Inserts<'appointments'>
 export type MessageInsert = Inserts<'messages'>
@@ -788,7 +788,7 @@ export type ChatMessageInsert = Inserts<'chat_messages'>
 // Update type exports
 export type UserUpdate = Updates<'users'>
 export type UserPreferencesUpdate = Updates<'user_preferences'>
-export type ApartmentUpdate = Updates<'apartments'>
+export type PropertyUpdate = Updates<'properties'>
 export type FavoriteUpdate = Updates<'favorites'>
 export type AppointmentUpdate = Updates<'appointments'>
 export type MessageUpdate = Updates<'messages'>

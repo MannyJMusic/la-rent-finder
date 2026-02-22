@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data: appointments, error } = await supabase
       .from('appointments')
-      .select('*, apartments(*)')
+      .select('*, properties(*)')
       .eq('user_id', user.id)
       .order('scheduled_time', { ascending: true });
 
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     // Verify the apartment exists
     const { data: apartment, error: aptError } = await supabase
-      .from('apartments')
+      .from('properties')
       .select('id')
       .eq('id', apartment_id)
       .single();
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         notes: notes || null,
         status: 'scheduled',
       })
-      .select('*, apartments(*)')
+      .select('*, properties(*)')
       .single();
 
     if (error) {
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
         const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour default
 
         // Build a descriptive summary and location from the apartment data
-        const apartmentData = data.apartments as Record<string, unknown> | null;
+        const apartmentData = data.properties as Record<string, unknown> | null;
         const address = (apartmentData?.address as string) || 'TBD';
         const title = (apartmentData?.title as string) || 'Apartment';
 

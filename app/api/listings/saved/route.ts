@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data: favorites, error } = await supabase
       .from('favorites')
-      .select('*, apartments(*)')
+      .select('*, properties(*)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 

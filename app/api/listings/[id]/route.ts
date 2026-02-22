@@ -16,7 +16,7 @@ export async function GET(
   try {
     // Fetch the apartment listing
     const { data: listing, error: listingError } = await supabase
-      .from('apartments')
+      .from('properties')
       .select('*')
       .eq('id', id)
       .single();

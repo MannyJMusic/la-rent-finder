@@ -94,7 +94,7 @@ export class MarketResearcherAgent extends BaseAgent {
     const searchQuery = this.buildSearchQuery(context);
 
     yield* streamText(
-      `Searching for apartments: ${searchQuery}...`,
+      `Searching for properties: ${searchQuery}...`,
       this.name,
       20,
     );
@@ -123,7 +123,7 @@ export class MarketResearcherAgent extends BaseAgent {
       20,
     );
 
-    // Persist listings to the apartments table
+    // Persist listings to the properties table
     const persistedListings = await this.persistListings(rawListings);
 
     // Score listings
@@ -561,7 +561,7 @@ export class MarketResearcherAgent extends BaseAgent {
   // ─── Persistence ────────────────────────────────────────────────
 
   /**
-   * Persists discovered listings to the apartments table via upsert.
+   * Persists discovered listings to the properties table via upsert.
    * Returns listings with real DB-assigned UUIDs.
    */
   private async persistListings(listings: AgentListing[]): Promise<AgentListing[]> {
@@ -571,7 +571,7 @@ export class MarketResearcherAgent extends BaseAgent {
 
       for (const listing of listings) {
         const { data, error } = await supabase
-          .from('apartments')
+          .from('properties')
           .upsert(
             {
               title: listing.title,

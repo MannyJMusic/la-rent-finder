@@ -366,7 +366,7 @@ function createMockStream(
           try {
             const supabaseInner = await createClient();
             const { data: listings } = await supabaseInner
-              .from('apartments')
+              .from('properties')
               .select('*')
               .order('availability_score', { ascending: false, nullsFirst: false })
               .limit(5);

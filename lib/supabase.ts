@@ -157,11 +157,11 @@ export interface ChatMessage {
  */
 
 /**
- * Search apartments by location with radius
+ * Search properties by location with radius
  * @param latitude - Target latitude
  * @param longitude - Target longitude
  * @param radiusMiles - Search radius in miles (default: 5)
- * @returns Array of apartment IDs with distances
+ * @returns Array of property IDs with distances
  */
 export async function searchApartmentsNearby(
   latitude: number,
@@ -175,7 +175,7 @@ export async function searchApartmentsNearby(
   });
 
   if (error) {
-    console.error('Error searching apartments:', error);
+    console.error('Error searching properties:', error);
     throw error;
   }
 
@@ -183,9 +183,9 @@ export async function searchApartmentsNearby(
 }
 
 /**
- * Get user's favorite apartments with full apartment details
+ * Get user's favorite properties with full property details
  * @param userId - User ID
- * @returns Array of favorite apartments
+ * @returns Array of favorite properties
  */
 export async function getUserFavorites(userId: string) {
   const { data, error } = await supabase
@@ -194,7 +194,7 @@ export async function getUserFavorites(userId: string) {
       apartment_id,
       notes,
       created_at,
-      apartments:apartment_id (*)
+      properties:apartment_id (*)
     `)
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
@@ -208,7 +208,7 @@ export async function getUserFavorites(userId: string) {
 }
 
 /**
- * Get user's appointments with apartment details
+ * Get user's appointments with property details
  * @param userId - User ID
  * @returns Array of appointments
  */
@@ -221,7 +221,7 @@ export async function getUserAppointments(userId: string) {
       status,
       notes,
       created_at,
-      apartments:apartment_id (
+      properties:apartment_id (
         id,
         title,
         address,

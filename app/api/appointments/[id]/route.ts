@@ -38,7 +38,7 @@ export async function PUT(
       .update(updateData)
       .eq('id', id)
       .eq('user_id', user.id)
-      .select('*, apartments(*)')
+      .select('*, properties(*)')
       .single();
 
     if (error) {

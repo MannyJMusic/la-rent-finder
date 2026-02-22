@@ -72,7 +72,7 @@ const LA_COSTS = {
 
 // ─── Configuration ──────────────────────────────────────────────
 
-const COST_ESTIMATOR_SYSTEM_PROMPT = `You are a cost estimation specialist for Los Angeles rental apartments. Your job is to provide detailed, accurate cost breakdowns for renters.
+const COST_ESTIMATOR_SYSTEM_PROMPT = `You are a cost estimation specialist for Los Angeles rental properties. Your job is to provide detailed, accurate cost breakdowns for renters.
 
 When given listing details and a cost breakdown, generate a clear, friendly summary that:
 1. Highlights the total move-in cost prominently

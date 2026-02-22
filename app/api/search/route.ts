@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     // Build apartment query with filters
     let apartmentQuery = supabase
-      .from('apartments')
+      .from('properties')
       .select('*');
 
     // Text search across title, description, address, and location

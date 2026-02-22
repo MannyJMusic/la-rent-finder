@@ -22,7 +22,7 @@ import CostBreakdown, { type CostEstimate } from '@/components/costs/CostBreakdo
 interface SavedListing {
   id: string;
   apartment_id: string;
-  apartments: {
+  properties: {
     id: string;
     title: string;
     address: string;
@@ -137,7 +137,7 @@ export default function ComparePage() {
   const filteredListings = savedListings.filter((item) => {
     if (!searchFilter) return true;
     const search = searchFilter.toLowerCase();
-    const apt = item.apartments;
+    const apt = item.properties;
     return (
       apt.title?.toLowerCase().includes(search) ||
       apt.address?.toLowerCase().includes(search) ||
@@ -147,14 +147,14 @@ export default function ComparePage() {
 
   // Build comparison data
   const comparisonProperties = selectedIds.reduce<PropertyEstimate[]>((acc, id) => {
-    const saved = savedListings.find((s) => s.apartments.id === id);
+    const saved = savedListings.find((s) => s.properties.id === id);
     const estimate = estimates[id];
     if (saved && estimate) {
       acc.push({
-        id: saved.apartments.id,
-        title: saved.apartments.title,
-        address: saved.apartments.address,
-        price: saved.apartments.price,
+        id: saved.properties.id,
+        title: saved.properties.title,
+        address: saved.properties.address,
+        price: saved.properties.price,
         estimate,
       });
     }
@@ -325,7 +325,7 @@ export default function ComparePage() {
               ) : (
                 <div className="grid gap-3">
                   {filteredListings.map((item) => {
-                    const apt = item.apartments;
+                    const apt = item.properties;
                     const isSelected = selectedIds.includes(apt.id);
                     const isDisabled = !isSelected && selectedIds.length >= 4;
 

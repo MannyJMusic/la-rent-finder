@@ -123,7 +123,7 @@ const ORCHESTRATOR_CONFIG: AgentConfig = {
 const GENERAL_RESPONSE_SYSTEM_PROMPT = `You are a friendly, knowledgeable assistant for an LA rental apartment finder app. You help users find rental properties in Los Angeles.
 
 You can help with:
-- Searching for rental apartments in LA neighborhoods
+- Searching for rental properties in LA neighborhoods
 - Providing neighborhood information (safety, walkability, amenities, vibe)
 - Estimating move-in and monthly costs
 - Scheduling property viewings
@@ -364,7 +364,7 @@ export class OrchestratorAgent extends BaseAgent {
 
       // Fallback response
       yield* streamText(
-        "I'm sorry, I encountered an issue generating a response. I can help you search for apartments, estimate costs, or schedule viewings in Los Angeles. What would you like to do?",
+        "I'm sorry, I encountered an issue generating a response. I can help you search for properties, estimate costs, or schedule viewings in Los Angeles. What would you like to do?",
         this.name,
       );
     }
