@@ -2,7 +2,6 @@
 
 import { User } from '@supabase/supabase-js';
 import { useState, useCallback, useEffect } from 'react';
-import { Panel, Group, Separator } from 'react-resizable-panels';
 import { MessageSquare, Map, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import DashboardHeader from './DashboardHeader';
 import ChatPanel from './ChatPanel';
@@ -110,61 +109,55 @@ export default function DashboardLayout({ user }: DashboardLayoutProps) {
             {showDetails && <DetailPanel listing={selectedListing} />}
           </div>
         ) : (
-          // Desktop: Resizable panels
-          <Group orientation="horizontal" className="h-full">
+          // Desktop: Flexbox three-column layout
+          <div className="flex h-full">
             {/* Left Panel: Chat */}
             {showChat && (
               <>
-                <Panel defaultSize={25} minSize={20} maxSize={35}>
+                <div className="w-[25%] min-w-[280px] max-w-[420px] h-full overflow-hidden border-r border-border">
                   <ChatPanel onListingsReceived={handleListingsReceived} />
-                </Panel>
-                <Separator className="w-1 bg-border hover:bg-primary transition-colors" />
+                </div>
               </>
             )}
 
             {/* Center Panel: Map/Listings */}
-            <Panel defaultSize={showChat && showDetails ? 50 : showChat || showDetails ? 75 : 100} minSize={30}>
-              <div className="relative h-full">
-                <MapListingsPanel
-                  chatListings={chatListings}
-                  onListingSelect={handleListingSelect}
-                  selectedListing={selectedListing}
-                />
+            <div className="flex-1 min-w-0 h-full relative">
+              <MapListingsPanel
+                chatListings={chatListings}
+                onListingSelect={handleListingSelect}
+                selectedListing={selectedListing}
+              />
 
-                {/* Toggle buttons for side panels */}
-                {!showChat && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="absolute left-2 top-2 z-10"
-                    onClick={() => setShowChat(true)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                )}
-                {!showDetails && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="absolute right-2 top-2 z-10"
-                    onClick={() => setShowDetails(true)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            </Panel>
+              {/* Toggle buttons for side panels */}
+              {!showChat && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute left-2 top-2 z-10"
+                  onClick={() => setShowChat(true)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
+              {!showDetails && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute right-2 top-2 z-10"
+                  onClick={() => setShowDetails(true)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
 
             {/* Right Panel: Details */}
             {showDetails && (
-              <>
-                <Separator className="w-1 bg-border hover:bg-primary transition-colors" />
-                <Panel defaultSize={25} minSize={20} maxSize={35}>
-                  <DetailPanel listing={selectedListing} />
-                </Panel>
-              </>
+              <div className="w-[25%] min-w-[280px] max-w-[420px] h-full overflow-hidden border-l border-border">
+                <DetailPanel listing={selectedListing} />
+              </div>
             )}
-          </Group>
+          </div>
         )}
       </div>
     </div>
