@@ -115,13 +115,21 @@ export default function OnboardingWizard() {
         }
       }
 
-      await fetch('/api/user/preferences', {
+      const res = await fetch('/api/user/preferences', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
-      router.push('/dashboard');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('Failed to save preferences:', data);
+        setSaving(false);
+        return;
+      }
+
+      // Full page navigation to ensure fresh server component render
+      window.location.href = '/dashboard';
     } catch {
       setSaving(false);
     }
