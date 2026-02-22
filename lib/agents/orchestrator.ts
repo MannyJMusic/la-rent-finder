@@ -183,7 +183,18 @@ export class OrchestratorAgent extends BaseAgent {
     };
 
     // Step 2: Determine which agent handles this
-    const targetAgentName = INTENT_AGENT_MAP[intent];
+    let targetAgentName = INTENT_AGENT_MAP[intent];
+
+    // Safety net: if classified as general/preferences but extractedParams
+    // contain real search criteria, re-route to MarketResearcher.
+    if (!targetAgentName && this.hasSearchParams(extractedParams, request.preferences)) {
+      console.log(
+        `[Orchestrator] Intent "${intent}" has search params — upgrading to "search"`,
+      );
+      intent = 'search';
+      subContext.intent = intent;
+      targetAgentName = 'MarketResearcher';
+    }
 
     if (targetAgentName) {
       // Delegate to a sub-agent
@@ -313,6 +324,50 @@ export class OrchestratorAgent extends BaseAgent {
       params: parsed.params || {},
       confidence: parsed.confidence ?? 0.5,
     };
+  }
+
+  // ─── Search Param Detection ─────────────────────────────────
+
+  /**
+   * Returns true if the extracted params or user preferences contain
+   * enough search-relevant criteria that the user almost certainly
+   * wants a property search, even if intent was classified otherwise.
+   */
+  private hasSearchParams(
+    params: ExtractedParams,
+    preferences: OrchestratorRequest['preferences'],
+  ): boolean {
+    // Count how many search-relevant fields are populated
+    let signals = 0;
+
+    if (params.maxBudget || params.minBudget) signals++;
+    if (params.minBedrooms || params.maxBedrooms) signals++;
+    if (params.neighborhoods && params.neighborhoods.length > 0) signals++;
+    if (params.propertyTypes && params.propertyTypes.length > 0) signals++;
+    if (params.petFriendly) signals++;
+    if (params.parkingRequired) signals++;
+
+    // If the classifier extracted 2+ search params, this is a search
+    if (signals >= 2) return true;
+
+    // If 1 param was extracted AND user has preferences, likely a search
+    if (signals >= 1 && preferences) {
+      const hasPrefs =
+        !!preferences.max_budget ||
+        !!preferences.min_bedrooms ||
+        (preferences.neighborhoods && preferences.neighborhoods.length > 0);
+      if (hasPrefs) return true;
+    }
+
+    // Check the message text as a last resort
+    const msg = params.searchQuery?.toLowerCase() ?? '';
+    const searchKeywords = [
+      'search', 'find', 'look for', 'show me', 'get me',
+      'available', 'listings', 'rentals', 'properties',
+    ];
+    if (searchKeywords.some((kw) => msg.includes(kw))) return true;
+
+    return false;
   }
 
   // ─── Direct Response Handling ─────────────────────────────────
