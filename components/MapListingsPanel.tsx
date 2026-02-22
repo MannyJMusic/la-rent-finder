@@ -75,7 +75,6 @@ export default function MapListingsPanel({
       }
 
       // Apply sort
-      params.set('has_photos', 'true');
       params.set('sort', sortOptionToApi[sortBy] || 'score');
 
       // Pagination

@@ -135,42 +135,47 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
       );
     }
 
-    // Build requests — one per zip, or a single city-wide request
-    const targets = zips.length > 0 ? zips : [null];
+    // Build requests — one per zip, or a default set of popular LA zips
+    const DEFAULT_LA_ZIPS = ['90028', '90026', '90013', '90004', '90291', '90401'];
+    const targets = zips.length > 0 ? zips : DEFAULT_LA_ZIPS;
 
     let rateLimitRemaining: number | undefined;
     let rateLimitReset: string | undefined;
 
     for (const zip of targets) {
       try {
-        const searchParams = new URLSearchParams({
-          status_type: 'ForRent',
-          city: 'Los Angeles',
-          state_code: 'CA',
-          limit: '42',
-          offset: '0',
-        });
+        // v3/list is a POST endpoint with JSON body
+        const requestBody: Record<string, unknown> = {
+          status: ['for_rent'],
+          limit: 200,
+          offset: 0,
+          postal_code: zip,
+        };
 
-        if (zip) {
-          searchParams.set('postal_code', zip);
-        }
-        if (params.minPrice !== undefined) {
-          searchParams.set('price_min', String(params.minPrice));
-        }
-        if (params.maxPrice !== undefined) {
-          searchParams.set('price_max', String(params.maxPrice));
+        if (params.minPrice !== undefined || params.maxPrice !== undefined) {
+          requestBody.list_price = {};
+          if (params.minPrice !== undefined) {
+            (requestBody.list_price as Record<string, number>).min = params.minPrice;
+          }
+          if (params.maxPrice !== undefined) {
+            (requestBody.list_price as Record<string, number>).max = params.maxPrice;
+          }
         }
         if (params.minBedrooms !== undefined) {
-          searchParams.set('beds_min', String(params.minBedrooms));
+          requestBody.beds = { min: params.minBedrooms };
         }
 
-        const url = `${this.config.baseUrl}/properties/v3/list?${searchParams.toString()}`;
+        requestBody.sort = { direction: 'desc', field: 'list_date' };
+
+        const url = `${this.config.baseUrl}/properties/v3/list`;
 
         const response = await client.fetchJson<RealtyApiResponse>(url, {
+          method: 'POST',
           headers: {
             'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
             'X-RapidAPI-Host': 'realtor.p.rapidapi.com',
           },
+          body: requestBody,
           adapterName: 'RealtyInUs',
           delayBetweenRequests: this.config.delayBetweenRequests,
         });
@@ -187,12 +192,12 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
         allListings.push(...listings);
 
         console.log(
-          `[RealtyInUs] Fetched ${results.length} results${zip ? ` for zip ${zip}` : ' (city-wide)'}`,
+          `[RealtyInUs] Fetched ${results.length} results for zip ${zip}`,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[RealtyInUs] Failed to fetch${zip ? ` zip ${zip}` : ''}:`, message);
-        errors.push(`Failed to fetch listings${zip ? ` for zip ${zip}` : ''}: ${message}`);
+        console.error(`[RealtyInUs] Failed to fetch zip ${zip}:`, message);
+        errors.push(`Failed to fetch listings for zip ${zip}: ${message}`);
       }
     }
 
