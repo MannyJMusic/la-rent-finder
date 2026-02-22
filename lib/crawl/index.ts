@@ -16,4 +16,10 @@ export type {
   DeduplicationResult,
   DuplicateMatch,
   SourceAdapterConfig,
+  ApiSourceAdapter,
+  ApiSourceResult,
+  SyncSummary,
 } from './types';
+export { ApiSyncEngine, apiSyncEngine } from './sync-engine';
+export { ApiClient } from './api-client';
+export { apiAdapters } from './adapters/index';

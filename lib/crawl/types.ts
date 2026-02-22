@@ -106,3 +106,30 @@ export interface DeduplicationResult {
   unique: NormalizedListing[];
   duplicates: DuplicateMatch[];
 }
+
+// ─── API Source Adapter (structured JSON APIs) ──────────────────
+
+export interface ApiSourceAdapter {
+  config: SourceAdapterConfig;
+  fetchListings(params: CrawlSearchParams): Promise<ApiSourceResult>;
+  isConfigured(): boolean;
+}
+
+export interface ApiSourceResult {
+  listings: RawListing[];
+  errors: string[];
+  rateLimitRemaining?: number;
+  rateLimitReset?: string;
+}
+
+// ─── Sync Summary ──────────────────────────────────────────────
+
+export interface SyncSummary {
+  results: CrawlResult[];
+  totalListings: number;
+  errors: string[];
+  sourcesAttempted: number;
+  sourcesSucceeded: number;
+  startedAt: string;
+  completedAt: string;
+}
