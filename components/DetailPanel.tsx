@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Info,
   MapPin,
@@ -39,6 +39,10 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
   const [emailSuccess, setEmailSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Enrichment state
+  const [enrichedListing, setEnrichedListing] = useState<Record<string, unknown> | null>(null);
+  const [isEnriching, setIsEnriching] = useState(false);
+
   // Reset state when listing changes
   const [lastListingId, setLastListingId] = useState<string | null>(null);
   if (listing && listing.id !== lastListingId) {
@@ -48,7 +52,38 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
     setScheduleSuccess(false);
     setEmailSuccess(false);
     setError(null);
+    setEnrichedListing(null);
   }
+
+  // Fetch enriched data from API when listing changes
+  useEffect(() => {
+    if (!listing?.id) return;
+
+    let cancelled = false;
+    setIsEnriching(true);
+
+    fetch(`/api/listings/${listing.id}`, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to fetch listing details');
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setEnrichedListing(data.listing ?? null);
+        setIsSaved(!!data.is_saved);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[DetailPanel] Enrichment fetch failed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setIsEnriching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [listing?.id]);
 
   // Save / Unsave listing
   const handleToggleSave = async () => {
@@ -244,19 +279,25 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Image */}
-        <div className="aspect-video bg-muted rounded-lg overflow-hidden">
-          {listing.imageUrl || listing.image_url ? (
-            <img
-              src={listing.imageUrl || listing.image_url}
-              alt={listing.title}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <MapPin className="h-12 w-12 text-muted-foreground/40" />
+        {(() => {
+          const enrichedPhotos = enrichedListing?.photos as string[] | undefined;
+          const heroPhoto = enrichedPhotos?.[0] || listing.photos?.[0] || listing.imageUrl || listing.image_url;
+          return (
+            <div className="aspect-video bg-muted rounded-lg overflow-hidden">
+              {heroPhoto ? (
+                <img
+                  src={heroPhoto}
+                  alt={listing.title}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <MapPin className="h-12 w-12 text-muted-foreground/40" />
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
 
         {/* Title and address */}
         <div>
@@ -336,31 +377,74 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
           )}
         </div>
 
+        {/* Pet Policy & Parking */}
+        {(() => {
+          const petPolicy = (enrichedListing?.pet_policy as string) || listing.pet_policy;
+          return (
+            <div className="flex flex-wrap gap-2">
+              {petPolicy ? (
+                <div className="flex items-center gap-1 text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded-full">
+                  <PawPrint className="h-3 w-3" />
+                  {petPolicy}
+                </div>
+              ) : listing.pet_friendly ? (
+                <div className="flex items-center gap-1 text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded-full">
+                  <PawPrint className="h-3 w-3" />
+                  Pet-Friendly
+                </div>
+              ) : null}
+              {listing.parking && (
+                <div className="flex items-center gap-1 text-xs bg-blue-500/10 text-blue-500 px-2 py-1 rounded-full">
+                  <Car className="h-3 w-3" />
+                  Parking
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Amenities */}
-        {(listing.pet_friendly !== undefined || listing.parking !== undefined) && (
-          <div className="flex flex-wrap gap-2">
-            {listing.pet_friendly && (
-              <div className="flex items-center gap-1 text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded-full">
-                <PawPrint className="h-3 w-3" />
-                Pet-Friendly
+        {(() => {
+          const amenities = (enrichedListing?.amenities as string[]) || listing.amenities;
+          if (!amenities || amenities.length === 0) return null;
+          return (
+            <div>
+              <h4 className="font-semibold text-sm mb-2">Amenities</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {amenities.map((amenity: string, i: number) => (
+                  <span
+                    key={`${amenity}-${i}`}
+                    className="text-xs bg-muted px-2.5 py-1 rounded-full text-muted-foreground"
+                  >
+                    {amenity}
+                  </span>
+                ))}
               </div>
-            )}
-            {listing.parking && (
-              <div className="flex items-center gap-1 text-xs bg-blue-500/10 text-blue-500 px-2 py-1 rounded-full">
-                <Car className="h-3 w-3" />
-                Parking
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* Description */}
-        {listing.description && (
-          <div>
-            <h4 className="font-semibold text-sm mb-1">Description</h4>
-            <p className="text-sm text-muted-foreground">{listing.description}</p>
-          </div>
-        )}
+        {(() => {
+          const description = (enrichedListing?.description as string) || listing.description;
+          return (
+            <div>
+              <h4 className="font-semibold text-sm mb-1 flex items-center gap-2">
+                Description
+                {isEnriching && (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                )}
+              </h4>
+              {description ? (
+                <p className="text-sm text-muted-foreground">{description}</p>
+              ) : isEnriching ? (
+                <p className="text-sm text-muted-foreground italic">Loading details...</p>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">No description available</p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Error display */}
         {error && (

@@ -20,6 +20,13 @@ export interface Listing {
   property_type?: 'apartment' | 'house' | 'condo' | 'townhouse' | 'room';
   available_date?: string;
   created_at?: string;
+  amenities?: string[];
+  pet_policy?: string;
+  source_name?: string;
+  source_id?: string;
+  landlord_name?: string;
+  square_feet?: number;
+  location?: string;
 }
 
 export interface ListingCluster {

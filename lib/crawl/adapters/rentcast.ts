@@ -98,7 +98,7 @@ class RentCastAdapter implements ApiSourceAdapter {
     for (const target of targets) {
       try {
         const searchParams = new URLSearchParams({
-          limit: '500',
+          limit: '100',
         });
 
         if (target.type === 'coordinates') {

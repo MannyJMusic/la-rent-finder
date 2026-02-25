@@ -100,6 +100,46 @@ interface RealtyApiResponse {
   };
 }
 
+// ─── Detail Response Types ───────────────────────────────────────
+
+interface RealtyDetailResult {
+  property_id?: string;
+  description?: {
+    text?: string;
+    beds?: number;
+    baths?: number;
+    sqft?: number;
+    type?: string;
+    year_built?: number;
+    name?: string;
+  };
+  details?: Array<{
+    category?: string;
+    text?: string[];
+  }>;
+  photos?: Array<{ href?: string }>;
+  pet_policy?: {
+    cats?: boolean;
+    dogs?: boolean;
+    dogs_small?: boolean;
+    dogs_large?: boolean;
+  } | string;
+}
+
+interface RealtyDetailApiResponse {
+  data?: {
+    home?: RealtyDetailResult;
+  };
+}
+
+export interface PropertyEnrichmentData {
+  description: string | null;
+  amenities: string[];
+  photos: string[];
+  pet_policy: string | null;
+  landlord_name: string | null;
+}
+
 // ─── Adapter ────────────────────────────────────────────────────
 
 class RealtyInUsAdapter implements ApiSourceAdapter {
@@ -140,7 +180,7 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
     }
 
     // Build requests — one per zip, or a default set of popular LA zips
-    const DEFAULT_LA_ZIPS = ['90028', '90026', '90013', '90004', '90291', '90401'];
+    const DEFAULT_LA_ZIPS = ['90028', '90013'];
     const targets = zips.length > 0 ? zips : DEFAULT_LA_ZIPS;
 
     let rateLimitRemaining: number | undefined;
@@ -151,7 +191,7 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
         // v3/list is a POST endpoint with JSON body
         const requestBody: Record<string, unknown> = {
           status: ['for_rent'],
-          limit: 200,
+          limit: 50,
           offset: 0,
           postal_code: zip,
         };
@@ -211,6 +251,84 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
       rateLimitRemaining,
       rateLimitReset,
     };
+  }
+
+  async fetchPropertyDetail(propertyId: string): Promise<PropertyEnrichmentData | null> {
+    if (!this.isConfigured()) {
+      console.error('[RealtyInUs] RAPIDAPI_KEY is not configured for detail fetch');
+      return null;
+    }
+
+    const client = new ApiClient();
+    const url = `${this.config.baseUrl}/properties/v3/detail?property_id=${encodeURIComponent(propertyId)}`;
+
+    try {
+      const response = await client.fetchJson<RealtyDetailApiResponse>(url, {
+        headers: {
+          'X-RapidAPI-Key': process.env.RAPIDAPI_KEY!,
+          'X-RapidAPI-Host': 'realty-in-us.p.rapidapi.com',
+        },
+        adapterName: 'RealtyInUsDetail',
+        delayBetweenRequests: 1000,
+      });
+
+      const home = response.data?.data?.home;
+      if (!home) {
+        console.warn(`[RealtyInUs] No detail data for property ${propertyId}`);
+        return null;
+      }
+
+      // Extract description
+      const description = home.description?.text ?? null;
+
+      // Extract amenities from details[] categories
+      const amenities: string[] = [];
+      if (home.details && Array.isArray(home.details)) {
+        for (const detail of home.details) {
+          if (detail.text && Array.isArray(detail.text)) {
+            amenities.push(...detail.text);
+          }
+        }
+      }
+
+      // Extract photos (cap at 30 to avoid DB bloat)
+      const photos = (home.photos ?? [])
+        .map((p) => p.href)
+        .filter((h): h is string => Boolean(h))
+        .slice(0, 30);
+
+      // Extract pet_policy
+      let petPolicy: string | null = null;
+      if (home.pet_policy) {
+        if (typeof home.pet_policy === 'string') {
+          petPolicy = home.pet_policy;
+        } else {
+          const pp = home.pet_policy;
+          const parts: string[] = [];
+          if (pp.cats) parts.push('Cats allowed');
+          if (pp.dogs || pp.dogs_small || pp.dogs_large) {
+            if (pp.dogs_large) parts.push('Dogs allowed (large)');
+            else if (pp.dogs_small) parts.push('Dogs allowed (small)');
+            else parts.push('Dogs allowed');
+          }
+          petPolicy = parts.length > 0 ? parts.join(', ') : 'No pets';
+        }
+      }
+
+      const landlordName = home.description?.name ?? null;
+
+      return {
+        description,
+        amenities,
+        photos,
+        pet_policy: petPolicy,
+        landlord_name: landlordName,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[RealtyInUs] Failed to fetch detail for ${propertyId}:`, message);
+      return null;
+    }
   }
 
   private transformResults(results: RealtyResult[]): RawListing[] {
