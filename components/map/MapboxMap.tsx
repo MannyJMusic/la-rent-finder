@@ -5,7 +5,6 @@ import mapboxgl from 'mapbox-gl';
 import { Listing, MapBounds } from '@/lib/types/listing';
 import { Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { laNeighborhoods } from '@/lib/data/la-neighborhoods';
 
 interface MapboxMapProps {
   listings: Listing[];
@@ -62,108 +61,6 @@ export default function MapboxMap({
 
       map.current.on('load', () => {
         setMapLoaded(true);
-
-        // Add LA neighborhoods GeoJSON source with real data
-        if (map.current) {
-          map.current.addSource('neighborhoods', {
-            type: 'geojson',
-            data: laNeighborhoods as GeoJSON.FeatureCollection,
-          });
-
-          // Add neighborhood fill layer with rent-based coloring
-          // Green = affordable (<$2000), Yellow = mid ($2000-$2500), Red = expensive (>$2500)
-          map.current.addLayer({
-            id: 'neighborhood-fills',
-            type: 'fill',
-            source: 'neighborhoods',
-            paint: {
-              'fill-color': [
-                'interpolate',
-                ['linear'],
-                ['get', 'avgRent'],
-                1700, '#22c55e',  // green - most affordable
-                2100, '#84cc16',  // lime
-                2300, '#eab308',  // yellow - mid range
-                2500, '#f97316',  // orange
-                2900, '#ef4444',  // red - most expensive
-              ],
-              'fill-opacity': 0.25,
-            },
-          });
-
-          // Add neighborhood boundary layer
-          map.current.addLayer({
-            id: 'neighborhood-boundaries',
-            type: 'line',
-            source: 'neighborhoods',
-            paint: {
-              'line-color': [
-                'interpolate',
-                ['linear'],
-                ['get', 'avgRent'],
-                1700, '#22c55e',
-                2100, '#84cc16',
-                2300, '#eab308',
-                2500, '#f97316',
-                2900, '#ef4444',
-              ],
-              'line-width': 2,
-              'line-opacity': 0.7,
-            },
-          });
-
-          // Add neighborhood label layer
-          map.current.addLayer({
-            id: 'neighborhood-labels',
-            type: 'symbol',
-            source: 'neighborhoods',
-            layout: {
-              'text-field': ['get', 'name'],
-              'text-size': 12,
-              'text-anchor': 'center',
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
-            },
-            paint: {
-              'text-color': '#ffffff',
-              'text-halo-color': '#000000',
-              'text-halo-width': 1.5,
-              'text-opacity': 0.85,
-            },
-          });
-
-          // Show neighborhood info on hover
-          map.current.on('mouseenter', 'neighborhood-fills', () => {
-            if (map.current) {
-              map.current.getCanvas().style.cursor = 'pointer';
-            }
-          });
-
-          map.current.on('mouseleave', 'neighborhood-fills', () => {
-            if (map.current) {
-              map.current.getCanvas().style.cursor = '';
-            }
-          });
-
-          // Show popup on click with neighborhood details
-          map.current.on('click', 'neighborhood-fills', (e) => {
-            if (!e.features || e.features.length === 0) return;
-            const feature = e.features[0];
-            const props = feature.properties;
-            if (!props) return;
-
-            new mapboxgl.Popup({ offset: 10 })
-              .setLngLat(e.lngLat)
-              .setHTML(
-                `<div style="padding: 8px; min-width: 160px;">
-                  <h3 style="font-weight: bold; margin: 0 0 6px 0; font-size: 14px;">${props.name}</h3>
-                  <p style="margin: 2px 0; font-size: 13px;">Avg 1BR: <strong>$${Number(props.avgRent).toLocaleString()}/mo</strong></p>
-                  <p style="margin: 2px 0; font-size: 13px;">Walk Score: <strong>${props.walkScore}</strong></p>
-                </div>`
-              )
-              .addTo(map.current!);
-          });
-        }
       });
 
       map.current.on('moveend', () => {

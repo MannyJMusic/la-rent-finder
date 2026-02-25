@@ -1,6 +1,6 @@
 'use client';
 
-import { Map, List, Filter, Grid3x3, Loader2 } from 'lucide-react';
+import { Map, List, Grid3x3, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import MapboxMap from '@/components/map/MapboxMap';
@@ -16,6 +16,10 @@ interface MapListingsPanelProps {
   onListingSelect?: (listing: Listing) => void;
   /** Currently selected listing */
   selectedListing?: Listing | null;
+  /** Filters from parent (SearchFilterPanel) — if provided, overrides internal filters */
+  filters?: FilterValue;
+  /** Called when filters change (e.g., chip removal) — if provided, parent owns filter state */
+  onFiltersChange?: (filters: FilterValue) => void;
 }
 
 // Map SortOption to API sort param
@@ -30,13 +34,25 @@ export default function MapListingsPanel({
   chatListings,
   onListingSelect: onListingSelectProp,
   selectedListing: selectedListingProp,
+  filters: filtersProp,
+  onFiltersChange: onFiltersChangeProp,
 }: MapListingsPanelProps) {
   const [viewMode, setViewMode] = useState<'map' | 'list' | 'grid'>('map');
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('score');
-  const [filters, setFilters] = useState<FilterValue>({});
+  const [internalFilters, setInternalFilters] = useState<FilterValue>({});
   const [displayedCount, setDisplayedCount] = useState(20);
+
+  // Use controlled filters from parent if provided, else fall back to internal state
+  const filters = filtersProp !== undefined ? filtersProp : internalFilters;
+  const setFilters = (newFilters: FilterValue) => {
+    if (onFiltersChangeProp) {
+      onFiltersChangeProp(newFilters);
+    } else {
+      setInternalFilters(newFilters);
+    }
+  };
 
   // API data state
   const [apiListings, setApiListings] = useState<Listing[]>([]);
@@ -186,25 +202,13 @@ export default function MapListingsPanel({
   }, [sortedListings.length]);
 
   const handleRemoveFilter = (key: keyof FilterValue) => {
-    setFilters((prev) => {
-      const newFilters = { ...prev };
-      delete newFilters[key];
-      return newFilters;
-    });
+    const newFilters = { ...filters };
+    delete newFilters[key];
+    setFilters(newFilters);
   };
 
   const handleClearAllFilters = () => {
     setFilters({});
-  };
-
-  // Demo function to apply sample filters (for testing)
-  const applySampleFilters = () => {
-    setFilters({
-      neighborhood: ['Santa Monica', 'Venice'],
-      priceRange: { min: 2000, max: 4000 },
-      bedrooms: 2,
-      propertyType: ['house'],
-    });
   };
 
   return (
@@ -252,10 +256,6 @@ export default function MapListingsPanel({
             {(viewMode === 'grid' || viewMode === 'list') && (
               <SortDropdown value={sortBy} onChange={setSortBy} />
             )}
-            <Button variant="outline" size="sm" onClick={applySampleFilters}>
-              <Filter className="h-4 w-4 mr-1" />
-              Filters
-            </Button>
           </div>
         </div>
 
