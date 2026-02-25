@@ -7,6 +7,11 @@ import type {
 } from '../types';
 import { ApiClient } from '../api-client';
 
+// Upscale rdcpix.com thumbnail URLs from small (s.jpg) to large (l.jpg)
+function upscalePhotoUrl(url: string): string {
+  return url.replace(/s(\.\w+)$/, 'l$1');
+}
+
 // ─── Neighborhood-to-Zip Mapping (LA) ──────────────────────────
 
 const LA_NEIGHBORHOOD_ZIPS: Record<string, string[]> = {
@@ -291,10 +296,11 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
         }
       }
 
-      // Extract photos (cap at 30 to avoid DB bloat)
+      // Extract photos (cap at 30 to avoid DB bloat), upscale to large
       const photos = (home.photos ?? [])
         .map((p) => p.href)
         .filter((h): h is string => Boolean(h))
+        .map(upscalePhotoUrl)
         .slice(0, 30);
 
       // Extract pet_policy
@@ -348,11 +354,12 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
         // Photos: use full photos[] if available, otherwise primary_photo
         const fullPhotos = (result.photos ?? [])
           .map((p) => p.href)
-          .filter((h): h is string => Boolean(h));
+          .filter((h): h is string => Boolean(h))
+          .map(upscalePhotoUrl);
         const photos = fullPhotos.length > 0
           ? fullPhotos
           : result.primary_photo?.href
-            ? [result.primary_photo.href]
+            ? [upscalePhotoUrl(result.primary_photo.href)]
             : [];
 
         // Price: list_price, or midpoint of min/max range
