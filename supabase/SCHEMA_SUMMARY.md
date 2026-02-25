@@ -18,7 +18,7 @@ The LA Rent Finder application uses **Supabase (PostgreSQL)** with **PostGIS** f
 - [x] Generated TypeScript types: `lib/database.types.ts`
 - [x] Created Supabase client configuration: `lib/supabase.ts`
 
-## 📊 Database Schema (10 Tables)
+## 📊 Database Schema (14 Tables)
 
 ### 1. **users** - User Accounts
 **Purpose**: Store user account information and authentication data
@@ -72,14 +72,14 @@ The LA Rent Finder application uses **Supabase (PostgreSQL)** with **PostGIS** f
 
 ---
 
-### 3. **apartments** (listings) - Rental Property Listings
-**Purpose**: Store apartment/rental listings with photos and location data
+### 3. **properties** (aka apartments) - Rental Property Listings
+**Purpose**: Store apartment/rental listings with photos, location data, and enrichment from external APIs
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | UUID (PK) | Unique listing ID |
 | title | VARCHAR(255) | Listing title |
-| description | TEXT | Full description |
+| description | TEXT | Full description (NULL = not yet enriched, '' = enriched but no description) |
 | address | VARCHAR(500) | Full street address |
 | location | VARCHAR(255) | City/neighborhood |
 | price | DECIMAL(10,2) | Monthly rent price |
@@ -88,23 +88,33 @@ The LA Rent Finder application uses **Supabase (PostgreSQL)** with **PostGIS** f
 | bedrooms | INTEGER | Number of bedrooms |
 | bathrooms | DECIMAL(3,1) | Number of bathrooms |
 | square_feet | INTEGER | Square footage |
-| amenities | JSONB | Array of amenities |
-| photos | TEXT[] | Array of photo URLs |
+| property_type | TEXT | apartment, house, condo, townhouse, room |
+| amenities | JSONB | Array of normalized amenity strings |
+| photos | TEXT[] | Array of photo URLs (upscaled to large via rdcpix.com `l.jpg`) |
 | availability_score | DECIMAL(3,2) | AI availability score (0-1) |
 | available_date | DATE | Available move-in date |
 | lease_term | VARCHAR(50) | Lease duration |
-| pet_policy | VARCHAR(100) | Pet policy description |
+| pet_policy | VARCHAR(100) | Pet policy (e.g., "Cats allowed, Dogs allowed (large)") |
 | parking_available | BOOLEAN | Parking available flag |
 | furnished | BOOLEAN | Furnished flag |
 | listing_url | TEXT | Source listing URL |
 | contact_email | VARCHAR(255) | Contact email |
 | contact_phone | VARCHAR(20) | Contact phone |
-| landlord_name | VARCHAR(255) | Landlord/agent name |
+| landlord_name | VARCHAR(255) | Landlord/agent name (from v3/detail enrichment) |
+| source_name | TEXT | Data source: `realty_in_us`, `rentcast` |
+| source_id | TEXT | External property ID at source (used for detail API calls) |
+| source_url | TEXT | Primary source listing URL |
+| source_urls | TEXT[] | All URLs seen for this property across sources |
+| last_crawled_at | TIMESTAMPTZ | Last time this listing was seen during a crawl |
+| last_verified_at | TIMESTAMPTZ | Last verification timestamp |
+| is_active | BOOLEAN | Active listing flag (false = stale after 14 days) |
+| raw_data | JSONB | Raw API response data for debugging |
 | created_at | TIMESTAMPTZ | Listing created timestamp |
 | updated_at | TIMESTAMPTZ | Listing updated timestamp |
 
-**Indexes**: location, price, bedrooms, bathrooms, available_date, availability_score, coordinates (GIST geospatial)
+**Indexes**: location, price, bedrooms, bathrooms, available_date, availability_score, coordinates (GIST geospatial), source_name, source_id
 **RLS**: Everyone can read, authenticated users can insert/update
+**Note**: `description === null` is the enrichment indicator — on-demand detail fetch is triggered only when null. Set to `''` after enrichment to prevent repeat API calls.
 
 ---
 
@@ -265,6 +275,57 @@ The LA Rent Finder application uses **Supabase (PostgreSQL)** with **PostGIS** f
 
 ---
 
+### 11. **crawl_runs** - Crawl Execution History
+**Purpose**: Track each sync/crawl run with results and error info
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID (PK) | Crawl run ID |
+| source_name | TEXT | Comma-separated adapter names |
+| search_params | JSONB | Parameters used for the search |
+| started_at | TIMESTAMPTZ | Run start time |
+| completed_at | TIMESTAMPTZ | Run completion time |
+| status | TEXT | running, completed, failed |
+| listings_found | INTEGER | Total listings found |
+| listings_new | INTEGER | New listings inserted |
+| listings_updated | INTEGER | Existing listings updated |
+| listings_deactivated | INTEGER | Stale listings deactivated |
+| error_message | TEXT | Error details (if any) |
+| created_at | TIMESTAMPTZ | Record creation timestamp |
+
+---
+
+### 12. **crawl_sources** - Per-Property Source Tracking
+**Purpose**: Track which sources have seen each property, with per-source pricing
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID (PK) | Record ID |
+| property_id | UUID (FK → properties, CASCADE) | Associated property |
+| source_name | TEXT | Source adapter name |
+| source_id | TEXT | External ID at this source |
+| source_url | TEXT | Listing URL at this source |
+| last_seen_at | TIMESTAMPTZ | Last time source reported this listing |
+| price_at_source | NUMERIC | Price reported by this source |
+| is_active | BOOLEAN | Whether this source still shows the listing |
+| created_at | TIMESTAMPTZ | Record creation timestamp |
+
+---
+
+### 13. **communications** - Email/SMS/Call Log
+**Purpose**: Log outbound communications to landlords/agents
+
+*(See migration file for full schema)*
+
+---
+
+### 14. **chat_messages** - Individual Chat Messages
+**Purpose**: Store individual AI chat messages with role and content
+
+*(See migration file for full schema)*
+
+---
+
 ## 🔧 Database Functions
 
 ### `search_apartments_nearby(target_lat, target_lon, radius_miles)`
@@ -386,7 +447,7 @@ All tables have RLS enabled with comprehensive policies:
 
 ---
 
-**Last Updated**: 2026-02-11
-**Schema Version**: 2 (initial + missing tables)
-**Total Tables**: 10
+**Last Updated**: 2026-02-24
+**Schema Version**: 3 (initial + missing tables + communications/chat_messages + crawl tables)
+**Total Tables**: 14
 **Total Extensions**: 3 (uuid-ossp, postgis, pg_trgm)

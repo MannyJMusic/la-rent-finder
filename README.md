@@ -162,7 +162,9 @@ pm2 logs la-rent-finder
 
 - **AI Chat**: Natural language property search powered by Claude
 - **Interactive Map**: Mapbox-powered map with property markers and clustering
-- **Property Details**: Photos, amenities, pricing, and neighborhood info
+- **Property Details**: Photos carousel, amenities, pricing, and neighborhood info
+- **On-Demand Enrichment**: Property details (description, full photos, amenities, pet policy) fetched from Realty in US v3/detail API on first view, then cached in DB
+- **Automated Crawl Pipeline**: Cron-driven sync from Realty in US and RentCast APIs with normalization, deduplication, and lifecycle management
 - **Saved Listings**: Bookmark properties for later
 - **Appointments**: Schedule and manage property viewings
 - **Property Comparison**: Side-by-side comparison of listings
@@ -170,15 +172,77 @@ pm2 logs la-rent-finder
 - **Communications**: Email/SMS/call integration (Resend, Twilio)
 - **Auth**: Supabase Auth with email verification
 
+## Data Pipeline
+
+### Sources
+
+| Source | API | Data Provided |
+|--------|-----|---------------|
+| Realty in US | RapidAPI `realty-in-us` v3/list | Address, price, beds/baths, sqft, property type, thumbnail photos, coordinates |
+| Realty in US (detail) | RapidAPI `realty-in-us` v3/detail | Full description, 30+ high-res photos, amenities, pet policy, landlord name |
+| RentCast | RapidAPI `rentcast` | Address, price, beds/baths, sqft, property type (no photos/descriptions) |
+
+### Pipeline Flow
+
+```
+Cron (daily) or manual POST /api/sync
+  → Fetch from each adapter (Realty in US, RentCast)
+  → Normalize raw listings (address, neighborhood, amenities, property type)
+  → Deduplicate (exact address match or fuzzy: address ILIKE + price ±5% + bedrooms)
+  → Persist new / merge with existing
+  → Mark stale listings (inactive after 14 days)
+```
+
+### On-Demand Enrichment
+
+When a user views a Realty in US property for the first time (`description === null`):
+1. `GET /api/listings/[id]` calls the v3/detail endpoint
+2. Extracts description, photos (up to 30, upscaled to large), amenities, pet policy, landlord name
+3. Stores enrichment data back to the `properties` table via admin client
+4. Returns enriched data immediately in the response
+5. Subsequent views read from DB — no repeat API calls
+
+### Lifecycle
+
+- **Stale**: Properties not seen in 14 days are marked `is_active = false`
+- **Purge**: `purgeExpiredListings()` deletes after 90 days inactive (available but not currently cron-scheduled)
+
+### Current Limits (Development)
+
+| Setting | Value |
+|---------|-------|
+| Realty in US ZIP codes | 2 (`90028`, `90013`) |
+| Realty in US per-zip limit | 50 |
+| RentCast limit | 100 |
+| Detail photos cap | 30 per property |
+
+## Crawl Pipeline Code
+
+```
+lib/crawl/
+├── adapters/
+│   ├── index.ts            # Adapter registry
+│   ├── realty-in-us.ts     # Realty in US adapter (list + detail)
+│   └── rentcast.ts         # RentCast adapter
+├── api-client.ts           # Shared HTTP client with rate-limit handling
+├── dedup.ts                # Deduplication (exact + fuzzy match, merge)
+├── lifecycle.ts            # Stale marking + purge
+├── normalize.ts            # Address, amenity, neighborhood normalization
+└── types.ts                # RawListing, NormalizedListing, adapter interfaces
+```
+
 ## API Routes
 
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/chat` | AI chat completions |
 | `GET /api/listings` | Search listings |
-| `GET /api/listings/[id]` | Listing details |
+| `GET /api/listings/[id]` | Listing details + on-demand enrichment |
 | `POST /api/listings/[id]/save` | Save/unsave listing |
 | `GET /api/listings/saved` | User's saved listings |
+| `GET /api/cron/sync-listings` | Cron-triggered listing sync (requires CRON_SECRET) |
+| `POST /api/sync` | Manual listing sync (authenticated) |
+| `GET /api/enrich/photos` | Photo enrichment cron |
 | `GET/POST /api/appointments` | Manage appointments |
 | `GET/POST /api/estimates` | Cost estimates |
 | `POST /api/search` | Property search |
@@ -187,6 +251,21 @@ pm2 logs la-rent-finder
 | `POST /api/communications/email` | Send email |
 | `POST /api/communications/sms` | Send SMS |
 | `POST /api/communications/call` | Initiate call |
+
+## Environment Variables
+
+### Additional (Crawl Pipeline)
+
+```
+# RapidAPI (Realty in US + RentCast)
+RAPIDAPI_KEY=
+
+# RentCast direct API
+RENTCAST_API_KEY=
+
+# Cron authentication
+CRON_SECRET=
+```
 
 ## License
 

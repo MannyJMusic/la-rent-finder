@@ -51,6 +51,78 @@ LA Rental Finder is a multi-agent AI platform that helps users find rental prope
 
 ---
 
+## Crawl Pipeline Architecture (Implemented)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Cron / Manual Trigger                        │
+│              GET /api/cron/sync-listings (daily)                    │
+│              POST /api/sync (manual, authenticated)                 │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────┐  ┌──────────────────────┐
+│  Realty in US Adapter │  │   RentCast Adapter   │
+│  v3/list (ZIP-based) │  │  (city-wide search)  │
+│  50/zip × 2 zips     │  │  limit: 100          │
+└──────────┬───────────┘  └──────────┬───────────┘
+           │                         │
+           └────────────┬────────────┘
+                        ▼
+              ┌──────────────────┐
+              │   Normalize      │
+              │  (address, type, │
+              │   amenities,     │
+              │   neighborhood)  │
+              └────────┬─────────┘
+                       ▼
+              ┌──────────────────┐
+              │   Deduplicate    │
+              │  (exact address  │
+              │   or fuzzy match)│
+              └────────┬─────────┘
+                       ▼
+              ┌──────────────────┐
+              │  Persist / Merge │
+              │  (new → insert,  │
+              │   dup → merge)   │
+              └────────┬─────────┘
+                       ▼
+              ┌──────────────────┐
+              │  Lifecycle       │
+              │  (14d → stale,   │
+              │   90d → purge)   │
+              └──────────────────┘
+
+On-Demand Enrichment (when user views a property):
+
+┌──────────────────┐     ┌──────────────────────┐     ┌──────────────┐
+│ GET /api/listings │────▶│ description === null? │─yes─▶│ v3/detail    │
+│     /[id]        │     │ source = realty_in_us?│     │ API call     │
+└──────────────────┘     └──────────┬───────────┘     └──────┬───────┘
+                                    │ no                      │
+                                    ▼                         ▼
+                           Return cached data        Store to DB, then
+                           from properties table     return enriched data
+```
+
+### Pipeline Code Structure
+
+```
+lib/crawl/
+├── adapters/
+│   ├── index.ts            # Adapter registry (exports apiAdapters[])
+│   ├── realty-in-us.ts     # Realty in US: fetchListings() + fetchPropertyDetail()
+│   └── rentcast.ts         # RentCast: fetchListings()
+├── api-client.ts           # Shared HTTP client with retry + rate-limit handling
+├── dedup.ts                # findDuplicates(), mergeWithExisting(), persistNewListing()
+├── lifecycle.ts            # markStaleListings() (14d), purgeExpiredListings() (90d)
+├── normalize.ts            # normalizeRawListing(), normalizeAmenities(), etc.
+└── types.ts                # RawListing, NormalizedListing, ApiSourceAdapter interfaces
+```
+
+---
+
 ## Agent Definitions
 
 ### 1. Orchestrator Agent
@@ -105,18 +177,17 @@ LA Rental Finder is a multi-agent AI platform that helps users find rental prope
 - Browserbase MCP server (recommended) — for headless browser automation on JS-heavy sites
   - `mcp__browserbase__browse` — navigate dynamic listing sites (Facebook Marketplace, etc.)
 
-**Data Sources:**
+**Implemented Data Sources (via RapidAPI):**
+- **Realty in US** (`realty-in-us` v3/list) — Primary source. Returns address, price, beds/baths, sqft, property type, thumbnail photos, coordinates. ZIP-code-based search across LA neighborhoods.
+- **Realty in US** (`realty-in-us` v3/detail) — On-demand enrichment. Returns full description, 30+ high-res photos, structured amenities, pet policy, landlord name. Called once per property on first user view, then cached in DB.
+- **RentCast** (`rentcast`) — Secondary source. Returns address, price, beds/baths, sqft, property type. No photos or descriptions.
+
+**Planned Data Sources (not yet implemented):**
 - Zillow API / Zillow scraping
-- Realtor.com
-- Redfin
 - Craigslist (housing > apts/housing, rooms/shared)
 - Facebook Marketplace (rentals category, LA area)
 - Reddit (r/LArentals, r/LosAngeles, r/LAList)
 - Apartments.com
-- Trulia
-- HotPads
-- Individual property management sites (Westside Rentals, etc.)
-- Local realtor websites
 
 **Scoring Criteria:**
 - Price match (within budget ± 10%)
@@ -550,21 +621,19 @@ CREATE TABLE cost_estimates (
 ## Technology Stack
 
 ### Frontend
-- **Framework:** Next.js 14+ (App Router)
-- **Styling:** Tailwind CSS + Shadcn/ui
-- **State Management:** React Context + Zustand for global state
-- **Real-time:** Server-Sent Events (SSE) for agent status streaming
-- **Maps:** Mapbox GL JS or Google Maps for property location display
-- **Chat UI:** Custom chat interface with message threading
+- **Framework:** Next.js 16 (React 19, App Router)
+- **Styling:** Tailwind CSS 3 + shadcn/ui
+- **Maps:** Mapbox GL JS with clustering and score-colored pins
+- **Chat UI:** Custom chat interface powered by Anthropic Claude
 - **Port:** 3000
 
 ### Backend
-- **Runtime:** Node.js with Express or Next.js API routes
-- **Agent Framework:** Claude Agent SDK (Python) or Anthropic API directly
-- **Database:** Supabase (PostgreSQL)
-- **Authentication:** Supabase Auth (email/password, OAuth)
-- **File Storage:** Supabase Storage (for cached listing photos)
-- **API:** RESTful endpoints + WebSocket/SSE for real-time updates
+- **Runtime:** Node.js 22 (Next.js API routes)
+- **AI:** Anthropic Claude (via `@anthropic-ai/sdk`)
+- **Database:** Supabase (PostgreSQL + PostGIS + pg_trgm)
+- **Authentication:** Supabase Auth (email/password)
+- **Crawl Pipeline:** Automated multi-source listing sync with normalization, deduplication, on-demand enrichment, and lifecycle management
+- **Deployment:** GitHub Actions → Hostinger VPS (PM2 cluster, Nginx proxy)
 
 ### Agent Layer
 - **Orchestration:** Claude Agent SDK with multi-agent delegation
@@ -754,15 +823,16 @@ GITHUB_REPO=owner/la-rental-finder
 - Filter chips: Neighborhoods, Price Range, Bedrooms, Pet-Friendly, Parking
 - Infinite scroll with lazy loading
 
-**4. Listing Detail (Right Panel)**
-- Photo carousel with fullscreen mode
-- Property details (address, price, beds, baths, sqft, amenities)
-- Score breakdown radar chart (price, location, size, amenities, quality)
-- Agent recommendation summary (pros/cons)
-- Cost estimate summary (move-in, monthly, annual)
-- Action buttons: Save, Dismiss, Schedule Viewing, Contact, Get Cost Estimate
-- Source link and listing freshness indicator
-- Communication history for this listing
+**4. Listing Detail (Right Panel) — `components/DetailPanel.tsx`**
+- Photo carousel with prev/next arrows, photo counter (up to 30 photos from on-demand enrichment)
+- Property details (address, price, beds, baths, sqft, neighborhood)
+- Score badge (color-coded 0-100)
+- Enriched description (fetched on-demand from v3/detail, with loading spinner)
+- Amenities displayed as pill badges (normalized via `normalizeAmenities()`)
+- Pet policy string (structured: "Cats allowed, Dogs allowed (large)")
+- Cost estimate breakdown (move-in, monthly, moving)
+- Action buttons: Save/Unsave, Schedule Viewing, Get Cost Estimate, Contact via Email
+- On-demand enrichment via `useEffect` → `GET /api/listings/[id]` on listing selection
 
 **5. Appointments Dashboard**
 - Calendar view of scheduled viewings
