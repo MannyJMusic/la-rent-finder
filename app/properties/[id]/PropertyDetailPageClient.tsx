@@ -70,7 +70,7 @@ export default function PropertyDetailPageClient({ id }: PropertyDetailPageClien
             </Button>
           </div>
         ) : (
-          <div className="max-w-2xl mx-auto h-full overflow-y-auto">
+          <div className="max-w-4xl mx-auto h-full overflow-y-auto">
             <DetailPanel listing={listing} />
           </div>
         )}

@@ -107,14 +107,17 @@ export default function MapboxMap({
 
       const color = getScoreColor(listing.score);
 
-      // Create marker element
+      // Create marker element — outer el is positioned by Mapbox (don't touch its transform)
       const el = document.createElement('div');
       el.className = 'listing-marker';
+      el.style.cssText = 'cursor: pointer;';
+
+      // Inner div holds all visual styles + hover scale (safe from Mapbox's transform)
+      const inner = document.createElement('div');
       const imageUrl = listing.imageUrl || listing.photos?.[0];
 
       if (imageUrl) {
-        // Photo marker: circular thumbnail with score-colored border
-        el.style.cssText = `
+        inner.style.cssText = `
           width: 40px;
           height: 40px;
           border-radius: 50%;
@@ -123,29 +126,28 @@ export default function MapboxMap({
           background-position: center;
           border: 3px solid ${color};
           box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-          cursor: pointer;
           transition: transform 0.2s;
         `;
       } else {
-        // Fallback: solid color circle
-        el.style.cssText = `
+        inner.style.cssText = `
           width: 30px;
           height: 30px;
           border-radius: 50%;
           background-color: ${color};
           border: 3px solid white;
           box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          cursor: pointer;
           transition: transform 0.2s;
         `;
       }
 
-      // Hover effect
-      el.addEventListener('mouseenter', () => {
-        el.style.transform = 'scale(1.2)';
+      el.appendChild(inner);
+
+      // Hover effect on inner div (not the Mapbox-positioned outer el)
+      inner.addEventListener('mouseenter', () => {
+        inner.style.transform = 'scale(1.2)';
       });
-      el.addEventListener('mouseleave', () => {
-        el.style.transform = 'scale(1)';
+      inner.addEventListener('mouseleave', () => {
+        inner.style.transform = 'scale(1)';
       });
 
       // Create marker
