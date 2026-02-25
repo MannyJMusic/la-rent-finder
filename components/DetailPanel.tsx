@@ -19,6 +19,8 @@ import {
   XCircle,
   PawPrint,
   Car,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Listing } from '@/lib/types/listing';
@@ -42,6 +44,7 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
   // Enrichment state
   const [enrichedListing, setEnrichedListing] = useState<Record<string, unknown> | null>(null);
   const [isEnriching, setIsEnriching] = useState(false);
+  const [photoIndex, setPhotoIndex] = useState(0);
 
   // Reset state when listing changes
   const [lastListingId, setLastListingId] = useState<string | null>(null);
@@ -53,6 +56,7 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
     setEmailSuccess(false);
     setError(null);
     setEnrichedListing(null);
+    setPhotoIndex(0);
   }
 
   // Fetch enriched data from API when listing changes
@@ -278,18 +282,49 @@ export default function DetailPanel({ listing }: DetailPanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Image */}
+        {/* Photo carousel */}
         {(() => {
           const enrichedPhotos = enrichedListing?.photos as string[] | undefined;
-          const heroPhoto = enrichedPhotos?.[0] || listing.photos?.[0] || listing.imageUrl || listing.image_url;
+          const photos: string[] = (enrichedPhotos?.length ? enrichedPhotos : listing.photos) ?? [];
+          // Fall back to single hero image
+          if (photos.length === 0) {
+            const fallback = listing.imageUrl || listing.image_url;
+            if (fallback) photos.push(fallback);
+          }
+          const total = photos.length;
+          const safeIndex = total > 0 ? Math.min(photoIndex, total - 1) : 0;
+
           return (
-            <div className="aspect-video bg-muted rounded-lg overflow-hidden">
-              {heroPhoto ? (
-                <img
-                  src={heroPhoto}
-                  alt={listing.title}
-                  className="w-full h-full object-cover"
-                />
+            <div className="relative aspect-video bg-muted rounded-lg overflow-hidden group">
+              {total > 0 ? (
+                <>
+                  <img
+                    src={photos[safeIndex]}
+                    alt={`${listing.title} - Photo ${safeIndex + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                  {total > 1 && (
+                    <>
+                      <button
+                        onClick={() => setPhotoIndex(safeIndex === 0 ? total - 1 : safeIndex - 1)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        aria-label="Previous photo"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setPhotoIndex(safeIndex === total - 1 ? 0 : safeIndex + 1)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        aria-label="Next photo"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                      <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full">
+                        {safeIndex + 1} / {total}
+                      </div>
+                    </>
+                  )}
+                </>
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
                   <MapPin className="h-12 w-12 text-muted-foreground/40" />
