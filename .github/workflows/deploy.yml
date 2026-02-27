@@ -86,16 +86,18 @@ jobs:
           # Copy PM2 ecosystem config
           cp ecosystem.config.cjs deploy-package/
 
-          # Copy deploy script
+          # Copy scripts
           mkdir -p deploy-package/scripts
           cp scripts/deploy.sh deploy-package/scripts/
+          cp scripts/cron-sync.js deploy-package/scripts/
+          cp scripts/cron-enrich.js deploy-package/scripts/
 
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload artifacts to VPS
         run: |
