@@ -9,6 +9,7 @@ export interface CrawlSearchParams {
   maxPrice?: number;
   minBedrooms?: number;
   maxBedrooms?: number;
+  zipCodes?: string[];   // bypass neighborhood→zip mapping; passed directly to API
 }
 
 // ─── Raw Listing (before normalization) ─────────────────────────

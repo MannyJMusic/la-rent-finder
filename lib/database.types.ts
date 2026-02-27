@@ -5,8 +5,9 @@
  *   - 20260211000002_add_missing_tables.sql
  *   - 20260212000001_add_communications_and_chat_messages.sql
  *   - add_crawl_pipeline_schema
+ *   - 20260224000001_add_round2_columns.sql
  *
- * Last updated: 2026-02-21
+ * Last updated: 2026-02-24
  */
 
 export type Json =
@@ -587,20 +588,31 @@ export type Database = {
           furnished: boolean | null
           id: string
           is_active: boolean | null
+          isp_download_mbps: number | null
+          isp_upload_mbps: number | null
           landlord_name: string | null
           last_crawled_at: string | null
           last_verified_at: string | null
           latitude: number | null
+          laundry_category: string | null
           lease_term: string | null
+          listed_date: string | null
           listing_url: string | null
           location: string
           longitude: number | null
+          noise_airports: number | null
+          noise_local: number | null
+          noise_score: number | null
+          noise_text: string | null
+          noise_traffic: number | null
           parking_available: boolean | null
           pet_policy: string | null
           photos: string[] | null
           price: number
           property_type: string
           raw_data: Json | null
+          reported_as_inactive: boolean | null
+          reported_at: string | null
           source_id: string | null
           source_name: string | null
           source_url: string | null
@@ -608,6 +620,7 @@ export type Database = {
           square_feet: number | null
           title: string
           updated_at: string | null
+          year_built: number | null
         }
         Insert: {
           address: string
@@ -623,20 +636,31 @@ export type Database = {
           furnished?: boolean | null
           id?: string
           is_active?: boolean | null
+          isp_download_mbps?: number | null
+          isp_upload_mbps?: number | null
           landlord_name?: string | null
           last_crawled_at?: string | null
           last_verified_at?: string | null
           latitude?: number | null
+          laundry_category?: string | null
           lease_term?: string | null
+          listed_date?: string | null
           listing_url?: string | null
           location: string
           longitude?: number | null
+          noise_airports?: number | null
+          noise_local?: number | null
+          noise_score?: number | null
+          noise_text?: string | null
+          noise_traffic?: number | null
           parking_available?: boolean | null
           pet_policy?: string | null
           photos?: string[] | null
           price: number
           property_type?: string
           raw_data?: Json | null
+          reported_as_inactive?: boolean | null
+          reported_at?: string | null
           source_id?: string | null
           source_name?: string | null
           source_url?: string | null
@@ -644,6 +668,7 @@ export type Database = {
           square_feet?: number | null
           title: string
           updated_at?: string | null
+          year_built?: number | null
         }
         Update: {
           address?: string
@@ -659,20 +684,31 @@ export type Database = {
           furnished?: boolean | null
           id?: string
           is_active?: boolean | null
+          isp_download_mbps?: number | null
+          isp_upload_mbps?: number | null
           landlord_name?: string | null
           last_crawled_at?: string | null
           last_verified_at?: string | null
           latitude?: number | null
+          laundry_category?: string | null
           lease_term?: string | null
+          listed_date?: string | null
           listing_url?: string | null
           location?: string
           longitude?: number | null
+          noise_airports?: number | null
+          noise_local?: number | null
+          noise_score?: number | null
+          noise_text?: string | null
+          noise_traffic?: number | null
           parking_available?: boolean | null
           pet_policy?: string | null
           photos?: string[] | null
           price?: number
           property_type?: string
           raw_data?: Json | null
+          reported_as_inactive?: boolean | null
+          reported_at?: string | null
           source_id?: string | null
           source_name?: string | null
           source_url?: string | null
@@ -680,6 +716,7 @@ export type Database = {
           square_feet?: number | null
           title?: string
           updated_at?: string | null
+          year_built?: number | null
         }
         Relationships: []
       }

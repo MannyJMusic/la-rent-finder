@@ -103,3 +103,8 @@ secrets.json
 
 # Deployment artifacts
 deploy-package/
+/.fastRequest/collections/Root/Default Group/Temp Group/20260226165123583.rapi
+/.fastRequest/collections/Root/Default Group/Temp Group/directory.json
+/.fastRequest/collections/Root/Default Group/directory.json
+/.fastRequest/config/fastRequestCurrentProjectConfig.json
+/.fastRequest/config/fastRequestCurrentProjectEnvironment.json

@@ -21,17 +21,6 @@
         "--header",
         "x-api-key: ${RAPIDAPI_KEY}"
       ]
-    },
-    "RapidAPI Hub - Realty in CA": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://mcp.rapidapi.com",
-        "--header",
-        "x-api-host: realty-in-ca.p.rapidapi.com",
-        "--header",
-        "x-api-key: ${RAPIDAPI_KEY}"
-      ]
     }
   }
 }

@@ -27,6 +27,14 @@ export interface Listing {
   landlord_name?: string;
   square_feet?: number;
   location?: string;
+  year_built?: number;
+  laundry_category?: string;
+  noise_score?: number;
+  noise_text?: string;
+  isp_download_mbps?: number;
+  isp_upload_mbps?: number;
+  listed_date?: string;
+  reported_as_inactive?: boolean;
 }
 
 export interface ListingCluster {

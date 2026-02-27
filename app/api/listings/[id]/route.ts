@@ -30,64 +30,111 @@ export async function GET(
     }
 
     // ─── On-demand detail enrichment ───────────────────────────
-    if (
-      listing.source_name === 'realty_in_us' &&
+    const needsEnrichment =
       listing.description === null &&
-      listing.source_id
-    ) {
+      (!listing.photos || (listing.photos as string[]).length === 0);
+
+    if (needsEnrichment) {
       try {
-        const enrichment = await realtyInUsAdapter.fetchPropertyDetail(listing.source_id);
+        if (listing.source_name === 'realty_in_us' && listing.source_id) {
+          // Direct enrichment — we have the Realty in US property_id
+          const enrichment = await realtyInUsAdapter.fetchPropertyDetail(listing.source_id);
 
-        const adminSupabase = createAdminClient();
-        const updates: Record<string, unknown> = {};
+          const adminSupabase = createAdminClient();
+          const updates: Record<string, unknown> = {};
 
-        if (enrichment) {
-          // Description: store actual text, or empty string to prevent retry
-          updates.description = enrichment.description || '';
+          if (enrichment) {
+            // Description: store actual text, or empty string to prevent retry
+            updates.description = enrichment.description || '';
 
-          // Photos: only replace if enrichment has more
-          if (enrichment.photos.length > 0) {
-            const existingPhotos = listing.photos ?? [];
-            if (enrichment.photos.length > existingPhotos.length) {
-              updates.photos = enrichment.photos;
+            // Photos: only replace if enrichment has more
+            if (enrichment.photos.length > 0) {
+              const existingPhotos = listing.photos ?? [];
+              if (enrichment.photos.length > existingPhotos.length) {
+                updates.photos = enrichment.photos;
+              }
             }
+
+            // Amenities: merge and normalize
+            if (enrichment.amenities.length > 0) {
+              const existingAmenities = Array.isArray(listing.amenities)
+                ? (listing.amenities as string[])
+                : [];
+              const merged = normalizeAmenities([
+                ...existingAmenities,
+                ...enrichment.amenities,
+              ]);
+              updates.amenities = merged as unknown as Json;
+            }
+
+            if (enrichment.pet_policy) {
+              updates.pet_policy = enrichment.pet_policy;
+            }
+
+            if (enrichment.landlord_name) {
+              updates.landlord_name = enrichment.landlord_name;
+            }
+          } else {
+            // API returned null — mark as enriched to prevent retry
+            updates.description = '';
           }
 
-          // Amenities: merge and normalize
-          if (enrichment.amenities.length > 0) {
-            const existingAmenities = Array.isArray(listing.amenities)
-              ? (listing.amenities as string[])
-              : [];
-            const merged = normalizeAmenities([
-              ...existingAmenities,
-              ...enrichment.amenities,
-            ]);
-            updates.amenities = merged as unknown as Json;
-          }
+          const { error: updateError } = await adminSupabase
+            .from('properties')
+            .update(updates)
+            .eq('id', id);
 
-          if (enrichment.pet_policy) {
-            updates.pet_policy = enrichment.pet_policy;
-          }
-
-          if (enrichment.landlord_name) {
-            updates.landlord_name = enrichment.landlord_name;
+          if (updateError) {
+            console.error(`[DetailEnrich] Failed to update ${id}:`, updateError.message);
+          } else {
+            console.log(`[DetailEnrich] Enriched property ${id} (realty_in_us direct)`);
+            Object.assign(listing, updates);
           }
         } else {
-          // API returned null — mark as enriched to prevent retry
-          updates.description = '';
-        }
+          // Cross-source enrichment — find a Realty in US match by address
+          const { enrichListingViaRealtyInUs } = await import('@/lib/crawl/enrichment');
+          const adminSupabase = createAdminClient();
+          const result = await enrichListingViaRealtyInUs(id, listing, adminSupabase);
 
-        const { error: updateError } = await adminSupabase
-          .from('properties')
-          .update(updates)
-          .eq('id', id);
+          if (result.enriched) {
+            // Re-fetch to get updated data written by enrichListingViaRealtyInUs
+            const { data: refreshed } = await adminSupabase
+              .from('properties')
+              .select('*')
+              .eq('id', id)
+              .single();
+            if (refreshed) Object.assign(listing, refreshed);
+          } else {
+            // No Realty in US counterpart found — mark attempted to prevent infinite retry
+            await adminSupabase
+              .from('properties')
+              .update({ description: '' })
+              .eq('id', id);
+            listing.description = '';
+          }
 
-        if (updateError) {
-          console.error(`[DetailEnrich] Failed to update ${id}:`, updateError.message);
-        } else {
-          console.log(`[DetailEnrich] Enriched property ${id}`);
-          // Merge into the listing object for the response
-          Object.assign(listing, updates);
+          // Return early — DB update was already handled by enrichListingViaRealtyInUs
+          const { data: scores } = await supabase
+            .from('listing_scores')
+            .select('*')
+            .eq('listing_id', id)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const { data: favorite } = await supabase
+            .from('favorites')
+            .select('apartment_id')
+            .eq('apartment_id', id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          return NextResponse.json({
+            listing,
+            scores: scores || null,
+            is_saved: !!favorite,
+          });
         }
       } catch (enrichErr) {
         console.error(`[DetailEnrich] Error enriching ${id}:`, enrichErr);

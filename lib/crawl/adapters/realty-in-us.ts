@@ -45,6 +45,34 @@ const LA_NEIGHBORHOOD_ZIPS: Record<string, string[]> = {
     '90802', '90803', '90804', '90806', '90807', '90808',
     '90813', '90814', '90815',
   ],
+  'mid-wilshire':    ['90036'],
+  'miracle mile':    ['90036'],
+  'fairfax':         ['90036', '90046'],
+  'hancock park':    ['90004', '90019'],
+  'larchmont':       ['90004'],
+  'mid-city':        ['90019'],
+  'west adams':      ['90016'],
+  'palms':           ['90034'],
+  'pico robertson':  ['90035'],
+  'playa del rey':   ['90293'],
+  'marina del rey':  ['90292'],
+  'ladera heights':  ['90056'],
+  'crenshaw':        ['90008', '90043'],
+  'leimert park':    ['90008', '90043'],
+  'boyle heights':   ['90023', '90033'],
+  'east los angeles':['90022', '90032'],
+  'lincoln heights': ['90031'],
+  'glassell park':   ['90065'],
+  'mount washington':['90065'],
+  'cypress park':    ['90065'],
+  'van nuys':        ['91401', '91402', '91405', '91406'],
+  'encino':          ['91316', '91436'],
+  'tarzana':         ['91356'],
+  'woodland hills':  ['91364', '91367'],
+  'inglewood':       ['90301', '90302', '90303', '90304'],
+  'hawthorne':       ['90250'],
+  'gardena':         ['90247', '90248', '90249'],
+  'torrance':        ['90501', '90503', '90505'],
 };
 
 function getZipsForNeighborhoods(neighborhoods: string[]): string[] {
@@ -184,9 +212,19 @@ class RealtyInUsAdapter implements ApiSourceAdapter {
       );
     }
 
+    // Merge in explicit zipCodes if provided (bypass neighborhood→zip mapping)
+    const zipCodesToSearch = [...zips];
+    if (params.zipCodes && params.zipCodes.length > 0) {
+      for (const zip of params.zipCodes) {
+        if (!zipCodesToSearch.includes(zip)) {
+          zipCodesToSearch.push(zip);
+        }
+      }
+    }
+
     // Build requests — one per zip, or a default set of popular LA zips
     const DEFAULT_LA_ZIPS = ['90028', '90013'];
-    const targets = zips.length > 0 ? zips : DEFAULT_LA_ZIPS;
+    const targets = zipCodesToSearch.length > 0 ? zipCodesToSearch : DEFAULT_LA_ZIPS;
 
     let rateLimitRemaining: number | undefined;
     let rateLimitReset: string | undefined;
