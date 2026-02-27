@@ -30,9 +30,12 @@ export async function GET(
     }
 
     // ─── On-demand detail enrichment ───────────────────────────
+    // realty_in_us: enrich whenever description is missing (direct fetch via source_id)
+    // other sources: only enrich when both description AND photos are missing (cross-source is expensive)
     const needsEnrichment =
       listing.description === null &&
-      (!listing.photos || (listing.photos as string[]).length === 0);
+      (listing.source_name === 'realty_in_us' ||
+        (!listing.photos || (listing.photos as string[]).length === 0));
 
     if (needsEnrichment) {
       try {
